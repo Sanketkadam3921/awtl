@@ -1,0 +1,1866 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_SYMBOLS 50
+
+// Symbol Table Structure
+typedef struct {
+    char symbol[20];
+    int address;
+} SymbolTable;
+
+typedef struct {
+    char mnemonic[10];
+    char type[3];  // "AD", "IS", "DL"
+    int opcode;    // Operation code
+} MOTEntry;
+
+SymbolTable symtab[MAX_SYMBOLS];
+int symbol_count = 0;
+int location_counter = 0;
+
+// Machine OpCode Table (MOT)
+MOTEntry mot[] = {
+    {"START", "AD", 01},
+    {"END", "AD", 02},
+    {"DS", "DL", 01},
+    {"DC", "DL", 02},
+    {"MOV", "IS", 01},
+    {"ADD", "IS", 02},
+    {"SUB", "IS", 03},
+    {"MUL", "IS", 04},
+    {"DIV", "IS", 05}
+};
+
+// Add symbol to symbol table
+void addSymbol(char *symbol, int address) {
+    strcpy(symtab[symbol_count].symbol, symbol);
+    symtab[symbol_count].address = address;
+    symbol_count++;
+}
+
+// Find MOT entry for an opcode
+MOTEntry* findMOT(char *opcode) {
+    for (int i = 0; i < sizeof(mot) / sizeof(MOTEntry); i++) {
+        if (strcmp(mot[i].mnemonic, opcode) == 0) {
+            return &mot[i];
+        }
+    }
+    return NULL; // Not found
+}
+
+// First Pass of Assembler
+void firstPass(FILE *input, FILE *ic, FILE *symtab_file) {
+    char label[20], opcode[20], operand[20];
+
+    while (fscanf(input, "%s %s %s", label, opcode, operand) != EOF) {
+        // Handle START directive
+        if (strcmp(opcode, "START") == 0) {
+            location_counter = atoi(operand);
+            fprintf(ic, "(AD,%02d) (C,%d)\n", 1, location_counter);
+            continue;
+        }
+
+        // Find opcode in MOT
+        MOTEntry *entry = findMOT(opcode);
+        if (entry == NULL) {
+            printf("Error: Invalid opcode '%s'\n", opcode);
+            continue;
+        }
+
+        // Add symbol to symbol table if present
+        if (strcmp(label, "-") != 0) {
+            addSymbol(label, location_counter);
+        }
+
+        // Handle DL instructions (e.g., DC, DS)
+        if (strcmp(entry->type, "DL") == 0) {
+            if (strcmp(opcode, "DS") == 0) {
+                fprintf(ic, "(%s,%02d) (C,%s)\n", entry->type, entry->opcode, operand);
+                location_counter += atoi(operand); // Allocate storage
+            } else if (strcmp(opcode, "DC") == 0) {
+                fprintf(ic, "(%s,%02d) (C,%s)\n", entry->type, entry->opcode, operand);
+                location_counter++; // Single word allocation
+            }
+            continue;
+        }
+
+        // Handle IS instructions
+        fprintf(ic, "LC:%d (%s,%02d) %s\n", location_counter, entry->type, entry->opcode, operand);
+        location_counter++;
+    }
+
+    // Write symbol table
+    for (int i = 0; i < symbol_count; i++) {
+        fprintf(symtab_file, "%s\t%d\n", symtab[i].symbol, symtab[i].address);
+    }
+}
+
+int main() {
+    FILE *input, *ic, *symtab_file;
+
+    // Open files
+    input = fopen("input.txt", "r");
+    if (input == NULL) {
+        printf("Error: Cannot open input file.\n");
+        return 1;
+    }
+
+    ic = fopen("intermediate1.txt", "w");
+    if (ic == NULL) {
+        printf("Error: Cannot open intermediate code file.\n");
+        fclose(input);
+        return 1;
+    }
+
+    symtab_file = fopen("symtab1.txt", "w");
+    if (symtab_file == NULL) {
+        printf("Error: Cannot open symbol table file.\n");
+        fclose(input);
+        fclose(ic);
+        return 1;
+    }
+
+    // Perform first pass
+    firstPass(input, ic, symtab_file);
+
+    // Close files
+    fclose(input);
+    fclose(ic);
+    fclose(symtab_file);
+
+    printf("Pass-1 completed successfully. Intermediate code and symbol table generated.\n");
+
+    return 0;
+}
+input for the file - - START 100
+LOOP ADD R1,R2
+- MOV R3,R4
+DATA DC 10
+- DS 5
+- END -
+
+
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_SYMBOLS 50
+#define MAX_LITERALS 50
+#define MAX_POOL 50
+
+// Symbol Table Structure
+typedef struct {
+    char name[20];
+    int address;
+} SymbolTable;
+
+// Literal Table Structure
+typedef struct {
+    char literal[20];
+    int address;
+} LiteralTable;
+
+// Global Data Structures
+SymbolTable symtab[MAX_SYMBOLS];
+LiteralTable littab[MAX_LITERALS];
+int poolTab[MAX_POOL];
+
+int symcount = 0, litcount = 0, poolcount = 0, LC = 0;
+
+// Function to add symbol to symbol table
+void addSymbol(char *symbol) {
+    // Check if the symbol already exists
+    for (int i = 0; i < symcount; i++) {
+        if (strcmp(symtab[i].name, symbol) == 0) {
+            return; // Symbol already exists
+        }
+    }
+    // Add symbol to symbol table
+    strcpy(symtab[symcount].name, symbol);
+    symtab[symcount].address = LC; // Assign address of symbol
+    symcount++;
+}
+
+// Function to add literal to literal table
+void addLiteral(char *literal) {
+    // Check if the literal already exists
+    for (int i = 0; i < litcount; i++) {
+        if (strcmp(littab[i].literal, literal) == 0) {
+            return; // Literal already exists
+        }
+    }
+    // Add literal to literal table
+    strcpy(littab[litcount].literal, literal);
+    littab[litcount].address = -1; // Unassigned initially
+    litcount++;
+}
+
+// Function to handle LTORG or END (Assign addresses to literals in the current pool)
+void assignLiterals() {
+    // Assign addresses to literals from current pool
+    for (int i = poolTab[poolcount]; i < litcount; i++) {
+        littab[i].address = LC; // Assign the current LC to literal
+        LC++;
+    }
+    // Update pool table
+    poolTab[poolcount++] = litcount;
+}
+
+// First Pass Processing
+void firstPass(FILE *input, FILE *ic, FILE *symfile, FILE *litfile, FILE *poolfile) {
+    char label[20], opcode[20], operand[20];
+
+    while (fscanf(input, "%s %s %s", label, opcode, operand) == 3) {
+        // Handle START directive
+        if (strcmp(opcode, "START") == 0) {
+            LC = atoi(operand);
+            fprintf(ic, "(AD,01) (C,%d)\n", LC);
+            continue;
+        }
+
+        // Handle Symbol (Label)
+        if (strcmp(label, "-") != 0) {
+            addSymbol(label);
+        }
+
+        // Handle Literal
+        if (operand[0] == '=') {
+            addLiteral(operand);
+        }
+
+        // Handle LTORG directive
+        if (strcmp(opcode, "LTORG") == 0) {
+            assignLiterals();
+            continue;
+        }
+
+        // Handle END directive
+        if (strcmp(opcode, "END") == 0) {
+            assignLiterals();
+            fprintf(ic, "(AD,02)\n");
+            break;
+        }
+
+        // Write Intermediate Code
+        fprintf(ic, "LC:%d %s %s\n", LC, opcode, operand);
+        LC++;
+    }
+
+    // Write Symbol Table
+    for (int i = 0; i < symcount; i++) {
+        fprintf(symfile, "%s\t%d\n", symtab[i].name, symtab[i].address);
+    }
+
+    // Write Literal Table
+    for (int i = 0; i < litcount; i++) {
+        fprintf(litfile, "%s\t%d\n", littab[i].literal, littab[i].address);
+    }
+
+    // Write Pool Table
+    for (int i = 0; i < poolcount; i++) {
+        fprintf(poolfile, "%d\n", poolTab[i]);
+    }
+}
+
+int main() {
+    FILE *input, *ic, *symfile, *litfile, *poolfile;
+
+    // Open files
+    input = fopen("input2.txt", "r");
+    if (input == NULL) {
+        printf("Error: Cannot open input file.\n");
+        return 1;
+    }
+
+    ic = fopen("intermediate.txt", "w");
+    symfile = fopen("symtab.txt", "w");
+    litfile = fopen("littab.txt", "w");
+    poolfile = fopen("pooltab.txt", "w");
+
+    // Perform First Pass
+    firstPass(input, ic, symfile, litfile, poolfile);
+
+    // Close files
+    fclose(input);
+    fclose(ic);
+    fclose(symfile);
+    fclose(litfile);
+    fclose(poolfile);
+
+    printf("Pass-1 completed successfully. Intermediate code, symbol table, literal table, and pool table generated.\n");
+
+    return 0;
+}
+input for the file - LABEL1  START  100
+LABEL2  ADD    =LIT1
+LABEL3  MOV    =LIT2
+LABEL4  LTORG
+LABEL5  SUB    =LIT3
+LABEL6  END
+
+
+
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define MAX 50
+
+typedef struct {
+    char name[20];
+    int mdtIndex;
+    int paramCount;
+} MNT;
+
+typedef struct {
+    char name[20];
+    int index;
+} PNTAB;
+
+MNT mnt[MAX];
+char mdt[MAX][100];
+PNTAB pntab[MAX];
+int mntCount = 0, mdtCount = 0, pntabCount = 0;
+
+void processMacro(FILE *fp) {
+    char line[100], macroName[20];
+    
+    // Read MACRO line
+    fscanf(fp, "%s %s", line, macroName);
+    
+    // Update MNT
+    strcpy(mnt[mntCount].name, macroName);
+    mnt[mntCount].mdtIndex = mdtCount;
+    mnt[mntCount].paramCount = 0;
+    
+    // Process parameters
+    fgets(line, sizeof(line), fp);
+    char *token = strtok(line, " ,\n");
+    while(token != NULL) {
+        if(token[0] == '&') {
+            strcpy(pntab[pntabCount].name, token);
+            pntab[pntabCount].index = pntabCount;
+            pntabCount++;
+            mnt[mntCount].paramCount++;
+        }
+        token = strtok(NULL, " ,\n");
+    }
+    
+    // Store macro definition in MDT
+    while(fgets(line, sizeof(line), fp)) {
+        if(strncmp(line, "MEND", 4) == 0) {
+            strcpy(mdt[mdtCount++], "MEND\n");
+            break;
+        }
+        strcpy(mdt[mdtCount++], line);
+    }
+    
+    mntCount++;
+}
+
+void writeToFiles() {
+    // Write MNT
+    FILE *mntFile = fopen("mnt.txt", "w");
+    fprintf(mntFile, "Macro Name\tMDT Index\tParameters\n");
+    for(int i = 0; i < mntCount; i++) {
+        fprintf(mntFile, "%s\t\t%d\t\t%d\n", 
+                mnt[i].name, mnt[i].mdtIndex, mnt[i].paramCount);
+    }
+    fclose(mntFile);
+    
+    // Write PNTAB
+    FILE *pntabFile = fopen("pntab.txt", "w");
+    fprintf(pntabFile, "Parameter\tIndex\n");
+    for(int i = 0; i < pntabCount; i++) {
+        fprintf(pntabFile, "%s\t\t%d\n", pntab[i].name, pntab[i].index);
+    }
+    fclose(pntabFile);
+    
+    // Write MDT
+    FILE *mdtFile = fopen("mdt.txt", "w");
+    fprintf(mdtFile, "Index\tDefinition\n");
+    for(int i = 0; i < mdtCount; i++) {
+        fprintf(mdtFile, "%d\t%s", i, mdt[i]);
+    }
+    fclose(mdtFile);
+}
+
+int main() {
+    FILE *input = fopen("input4.txt", "r");
+    if(!input) {
+        printf("Error opening input file\n");
+        return 1;
+    }
+    
+    char line[100];
+    while(fgets(line, sizeof(line), input)) {
+        if(strncmp(line, "MACRO", 5) == 0) {
+            processMacro(input);
+        }
+    }
+    
+    writeToFiles();
+    fclose(input);
+    printf("Processing complete. Check mnt.txt, pntab.txt, and mdt.txt for outputs.\n");
+    return 0;
+}
+
+
+
+input - MACRO
+ADD &ARG1, &ARG2, &ARG3
+LOAD &ARG1
+ADD &ARG2
+STORE &ARG3
+MEND
+
+MACRO
+SUB &X, &Y, &Z
+LOAD &X
+SUB &Y
+STORE &Z
+MEND
+
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+// Token Types
+enum TokenType {
+    KEYWORD, IDENTIFIER, CONSTANT, 
+    OPERATOR, SPECIAL_SYMBOL, STRING, 
+    PREPROCESSOR, COMMENT, UNKNOWN
+};
+
+// Keywords Array
+char *keywords[] = {
+    "int", "char", "float", "double", "void", 
+    "if", "else", "while", "for", "return", 
+    "switch", "case", "break", "continue"
+};
+
+// Function to identify token type
+enum TokenType getTokenType(char *token) {
+    // Check Keywords
+    for (int i = 0; i < sizeof(keywords)/sizeof(keywords[0]); i++) {
+        if (strcmp(token, keywords[i]) == 0) 
+            return KEYWORD;
+    }
+
+    // Check Identifier
+    if (isalpha(token[0]) || token[0] == '_') 
+        return IDENTIFIER;
+
+    // Check Constant
+    if (isdigit(token[0])) 
+        return CONSTANT;
+
+    // Check Operators and Special Symbols
+    char *operators[] = {"+", "-", "*", "/", "=", "==", "!="};
+    char *special_symbols[] = {"{", "}", "(", ")", ";", ","};
+
+    for (int i = 0; i < sizeof(operators)/sizeof(operators[0]); i++) {
+        if (strcmp(token, operators[i]) == 0) 
+            return OPERATOR;
+    }
+
+    for (int i = 0; i < sizeof(special_symbols)/sizeof(special_symbols[0]); i++) {
+        if (strcmp(token, special_symbols[i]) == 0) 
+            return SPECIAL_SYMBOL;
+    }
+
+    return UNKNOWN;
+}
+
+// Lexical Analyzer Function
+void lexicalAnalyze(FILE *input, FILE *output) {
+    char token[100];
+    int ch;
+
+    while ((ch = fgetc(input)) != EOF) {
+        // Skip Whitespaces
+        if (isspace(ch)) continue;
+
+        // Preprocessor Directives
+        if (ch == '#') {
+            ungetc(ch, input);
+            fscanf(input, "%[^\n]", token);
+            fprintf(output, "PREPROCESSOR: %s\n", token);
+            continue;
+        }
+
+        // Comments
+        if (ch == '/' && (ch = fgetc(input)) == '/') {
+            ungetc(ch, input);
+            fscanf(input, "%[^\n]", token);
+            fprintf(output, "COMMENT: %s\n", token);
+            continue;
+        }
+
+        // Strings
+        if (ch == '"') {
+            int i = 0;
+            while ((ch = fgetc(input)) != '"') 
+                token[i++] = ch;
+            token[i] = '\0';
+            fprintf(output, "STRING: %s\n", token);
+            continue;
+        }
+
+        // Tokens
+        ungetc(ch, input);
+        fscanf(input, "%s", token);
+        enum TokenType type = getTokenType(token);
+
+        switch (type) {
+            case KEYWORD: 
+                fprintf(output, "KEYWORD: %s\n", token); 
+                break;
+            case IDENTIFIER: 
+                fprintf(output, "IDENTIFIER: %s\n", token); 
+                break;
+            case CONSTANT: 
+                fprintf(output, "CONSTANT: %s\n", token); 
+                break;
+            case OPERATOR: 
+                fprintf(output, "OPERATOR: %s\n", token); 
+                break;
+            case SPECIAL_SYMBOL: 
+                fprintf(output, "SPECIAL SYMBOL: %s\n", token); 
+                break;
+            default: 
+                fprintf(output, "UNKNOWN: %s\n", token);
+        }
+    }
+}
+
+int main() {
+    FILE *input = fopen("input6.c", "r");
+    FILE *output = fopen("tokens.txt", "w");
+
+    if (!input || !output) {
+        printf("File error!\n");
+        return 1;
+    }
+
+    lexicalAnalyze(input, output);
+
+    fclose(input);
+    fclose(output);
+    return 0;
+}
+
+input- #include <stdio.h>
+
+int main() {
+    int x = 10;
+    float y = 20.5;
+    
+    // This is a comment
+    if (x > 5) {
+        printf("Hello, World!");
+    }
+    
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+machine code
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Data Structures
+typedef struct
+{
+    char symbol[20];
+    int address;
+    char type; // A for absolute, R for relocatable
+} SYMTAB;
+
+typedef struct
+{
+    char mnemonic[10];
+    int opcode;
+    int format; // Instruction format (1/2/3/4)
+} OPTAB;
+
+#define MAX_SYMBOLS 100
+#define MAX_OPCODES 50
+
+// Symbol Table
+SYMTAB symtab[MAX_SYMBOLS];
+int symtab_size = 0;
+
+// Opcode Table (hardcoded for simplicity)
+OPTAB optab[MAX_OPCODES] = {
+    {"ADD", 0x18, 3},
+    {"SUB", 0x1C, 3},
+    {"MUL", 0x20, 3},
+    {"DIV", 0x24, 3},
+    {"LOAD", 0x00, 3},
+    {"STORE", 0x0C, 3},
+    {"JUMP", 0x3C, 3},
+    {"COMP", 0x28, 3},
+    {"READ", 0x50, 3},
+    {"WRITE", 0x54, 3}};
+
+int base_address = 0;   // Base address of the program
+int program_length = 0; // Total length of the program
+
+// Function to load the symbol table from a file
+void load_symtab(char *filename)
+{
+    FILE *fp = fopen(filename, "r");
+    if (!fp)
+    {
+        printf("Error: Cannot open symbol table file\n");
+        exit(1);
+    }
+
+    // Read symbol table entries from the file
+    while (fscanf(fp, "%s %d %c", symtab[symtab_size].symbol,
+                  &symtab[symtab_size].address,
+                  &symtab[symtab_size].type) != EOF)
+    {
+        symtab_size++;
+    }
+    fclose(fp);
+}
+
+// Function to find the address of a symbol in the symbol table
+int find_symbol(char *symbol)
+{
+    for (int i = 0; i < symtab_size; i++)
+    {
+        if (strcmp(symtab[i].symbol, symbol) == 0)
+        {
+            return symtab[i].address;
+        }
+    }
+    return -1; // Return -1 if the symbol is not found
+}
+
+// Function to find the opcode for a given mnemonic
+int find_opcode(char *mnemonic)
+{
+    for (int i = 0; i < MAX_OPCODES; i++)
+    {
+        if (strcmp(optab[i].mnemonic, mnemonic) == 0)
+        {
+            return optab[i].opcode;
+        }
+    }
+    return -1; // Return -1 if the mnemonic is not found
+}
+
+// Function to generate object code for an instruction
+unsigned int generate_object_code(char *opcode, char *operand, int format)
+{
+    unsigned int object_code = 0;
+    int op = find_opcode(opcode);
+
+    if (op == -1)
+        return 0; // Return 0 if the opcode is invalid
+
+    switch (format)
+    {
+    case 3:                     // Format 3 instruction
+        object_code = op << 16; // Opcode in the first byte
+
+        // Handle different addressing modes
+        if (operand[0] == '#')
+        {                                                // Immediate addressing
+            object_code |= 0x010000;                     // Set immediate bit
+            object_code |= (atoi(operand + 1) & 0xFFFF); // Add immediate value
+        }
+        else if (operand[0] == '@')
+        {                                        // Indirect addressing
+            object_code |= 0x020000;             // Set indirect bit
+            int addr = find_symbol(operand + 1); // Find address of the symbol
+            if (addr != -1)
+                object_code |= (addr & 0xFFFF); // Add address
+        }
+        else
+        {                                    // Direct addressing
+            int addr = find_symbol(operand); // Find address of the symbol
+            if (addr != -1)
+                object_code |= (addr & 0xFFFF); // Add address
+        }
+        break;
+
+    case 4:                                    // Format 4 instruction (extended)
+        object_code = (op << 24) | 0x00100000; // Set extended bit
+        int addr = find_symbol(operand);       // Find address of the symbol
+        if (addr != -1)
+            object_code |= addr; // Add address
+        break;
+    }
+
+    return object_code;
+}
+
+// Main Pass-2 function to generate the object program
+void pass_two(char *ic_file, char *output_file)
+{
+    FILE *ic = fopen(ic_file, "r");         // Intermediate code file
+    FILE *output = fopen(output_file, "w"); // Output object program file
+
+    if (!ic || !output)
+    {
+        printf("Error: Cannot open input/output files\n");
+        exit(1);
+    }
+
+    char line[100], label[20], opcode[20], operand[20];
+    int address;
+
+    // Write the header record
+    fprintf(output, "H^PROGRAM^%06X^%06X\n", base_address, program_length);
+
+    // Variables for text record management
+    char text_record[70] = ""; // Text record buffer
+    int text_record_len = 0;   // Length of the current text record
+    int text_record_start = 0; // Starting address of the current text record
+
+    // Process each line of the intermediate code
+    while (fgets(line, sizeof(line), ic))
+    {
+        if (sscanf(line, "%d %s %s %s", &address, label, opcode, operand) >= 3)
+        {
+            if (strcmp(opcode, "START") == 0)
+            {
+                base_address = atoi(operand); // Set base address
+                continue;
+            }
+
+            if (strcmp(opcode, "END") == 0)
+            {
+                // Write the last text record if any
+                if (text_record_len > 0)
+                {
+                    fprintf(output, "T^%06X^%02X^%s\n",
+                            text_record_start, text_record_len / 2, text_record);
+                }
+                // Write the end record
+                fprintf(output, "E^%06X\n", base_address);
+                break;
+            }
+
+            // Generate object code for the instruction
+            unsigned int obj_code = generate_object_code(opcode, operand, 3);
+            char obj_code_str[9];
+            sprintf(obj_code_str, "%06X", obj_code);
+
+            // Start a new text record if the current one is empty
+            if (text_record_len == 0)
+            {
+                text_record_start = address;
+            }
+
+            // If the text record would exceed its length, write it out
+            if (text_record_len + 6 > 60)
+            {
+                fprintf(output, "T^%06X^%02X^%s\n",
+                        text_record_start, text_record_len / 2, text_record);
+                text_record[0] = '\0'; // Clear the text record buffer
+                text_record_len = 0;
+                text_record_start = address; // Set new start address
+            }
+
+            // Append the object code to the text record
+            strcat(text_record, obj_code_str);
+            text_record_len += 6;
+        }
+    }
+
+    fclose(ic);
+    fclose(output);
+}
+
+// Main function
+int main()
+{
+    // Load the symbol table
+    load_symtab("symtab.txt");
+
+    // Process the intermediate code and generate the object program
+    pass_two("intermediate.txt", "object_program.txt");
+
+    printf("Pass-2 completed successfully.\n");
+    return 0;
+}
+input input filee 
+intermediate.txt
+1000 COPY   START  1000
+1000 FIRST  LOAD   BUFFER
+1003        ADD    LENGTH
+1006        STORE  SECOND
+1009        END    FIRST
+
+
+symtab.txt
+FIRST   1000 R
+SECOND  2000 R
+BUFFER  3000 R
+LENGTH  3050 A
+
+
+#include <stdio.h>
+#include <string.h>
+
+#define MAX_MACRO_LINES 50
+
+char macro_table[MAX_MACRO_LINES][100];
+int macro_line_count = 0;
+
+void processMacroDefinition(FILE *input) {
+    char line[100];
+    while (fgets(line, sizeof(line), input)) {
+        if (strstr(line, "MEND")) break;
+        strcpy(macro_table[macro_line_count++], line);
+    }
+}
+
+void expandMacro(FILE *output, char *args) {
+    char *params[3];
+    int param_count = 0;
+
+    // Split arguments
+    char *token = strtok(args, ",");
+    while (token) {
+        params[param_count++] = token;
+        token = strtok(NULL, ",");
+    }
+
+    // Expand macro lines
+    for (int i = 0; i < macro_line_count; i++) {
+        char expanded_line[100];
+        strcpy(expanded_line, macro_table[i]);
+
+        // Replace parameters
+        for (int j = 0; j < param_count; j++) {
+            char placeholder[10];
+            sprintf(placeholder, "#%d", j+1);
+            char *pos = strstr(expanded_line, placeholder);
+            if (pos) {
+                strcpy(pos, params[j]);
+                strcat(pos, pos + strlen(placeholder));
+            }
+        }
+
+        // Write expanded line
+        fprintf(output, "%s", expanded_line);
+    }
+}
+
+int main() {
+    FILE *input = fopen("input5.mac", "r");
+    FILE *output = fopen("output5.mac", "w");
+    char line[100];
+
+    while (fgets(line, sizeof(line), input)) {
+        if (strstr(line, "MACRO")) {
+            processMacroDefinition(input);
+        }
+        else if (strstr(line, "SWAP")) {
+            char *args = line + 5;  // Skip "SWAP "
+            args[strcspn(args, "\n")] = 0;  // Remove newline
+            expandMacro(output, args);
+        }
+        else {
+            fprintf(output, "%s", line);
+        }
+    }
+
+    fclose(input);
+    fclose(output);
+    return 0;
+}
+
+MACRO SWAP #1,#2
+LOAD #1
+STORE #2
+LOAD #2
+STORE #1
+MEND
+START 100
+SWAP A,B
+END
+
+
+Symbol Table Generation Code
+
+This code focuses only on generating the symbol table.
+
+#include <stdio.h>
+#include <string.h>
+
+#define MAX_SYMBOLS 50
+
+typedef struct {
+    char symbol[20];
+    int address;
+} SymbolTable;
+
+SymbolTable symtab[MAX_SYMBOLS];
+int symbol_count = 0;
+
+void addSymbol(char *symbol, int address) {
+    strcpy(symtab[symbol_count].symbol, symbol);
+    symtab[symbol_count].address = address;
+    symbol_count++;
+}
+
+void generateSymbolTable(FILE *input, FILE *symtab_file) {
+    char label[20], opcode[20], operand[20];
+    int location_counter = 0;
+
+    while (fscanf(input, "%s %s %s", label, opcode, operand) == 3) {
+        if (strcmp(opcode, "START") == 0) {
+            location_counter = atoi(operand);
+            continue;
+        }
+        if (strcmp(label, "-") != 0) {
+            addSymbol(label, location_counter);
+        }
+        location_counter++;
+    }
+
+    for (int i = 0; i < symbol_count; i++) {
+        fprintf(symtab_file, "%s\t%d\n", symtab[i].symbol, symtab[i].address);
+    }
+}
+
+int main() {
+    FILE *input = fopen("input.txt", "r");
+    FILE *symtab_file = fopen("symtab_only.txt", "w");
+
+    generateSymbolTable(input, symtab_file);
+
+    fclose(input);
+    fclose(symtab_file);
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Intermediate Code Generation Code
+
+This code focuses only on generating intermediate code.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void generateIntermediateCode(FILE *input, FILE *ic_file) {
+    char label[20], opcode[20], operand[20];
+    int location_counter = 0;
+
+    while (fscanf(input, "%s %s %s", label, opcode, operand) == 3) {
+        if (strcmp(opcode, "START") == 0) {
+            location_counter = atoi(operand);
+            fprintf(ic_file, "(AD,01) (C,%d)\n", location_counter);
+            continue;
+        }
+
+        fprintf(ic_file, "LC:%d %s %s\n", location_counter, opcode, operand);
+        location_counter++;
+    }
+}
+
+int main() {
+    FILE *input = fopen("input.txt", "r");
+    FILE *ic_file = fopen("intermediate_only.txt", "w");
+
+    generateIntermediateCode(input, ic_file);
+
+    fclose(input);
+    fclose(ic_file);
+    return 0;
+}
+
+How to Run
+
+    Use input.txt with appropriate input in the format:
+
+LABEL OPCODE OPERAND
+
+Example:
+
+    - START 100
+    LOOP MOVER AREG,='5'
+    - ADD AREG,NUM
+    NUM DC 5
+    - STOP -
+
+    Compile and run the respective code snippets for symbol table or intermediate code generation.
+
+This separation keeps your code focused and ensures clarity when working on sub-questions.
+
+
+Symbol Table Generation Code
+
+This code focuses only on generating the symbol table.
+
+#include <stdio.h>
+#include <string.h>
+
+#define MAX_SYMBOLS 50
+
+typedef struct {
+    char name[20];
+    int address;
+} SymbolTable;
+
+SymbolTable symtab[MAX_SYMBOLS];
+int symcount = 0;
+
+void addSymbol(char *symbol, int LC) {
+    for (int i = 0; i < symcount; i++) {
+        if (strcmp(symtab[i].name, symbol) == 0) {
+            return; // Symbol already exists
+        }
+    }
+    strcpy(symtab[symcount].name, symbol);
+    symtab[symcount].address = LC;
+    symcount++;
+}
+
+void generateSymbolTable(FILE *input, FILE *symfile) {
+    char label[20], opcode[20], operand[20];
+    int LC = 0;
+
+    while (fscanf(input, "%s %s %s", label, opcode, operand) == 3) {
+        if (strcmp(opcode, "START") == 0) {
+            LC = atoi(operand);
+            continue;
+        }
+
+        if (strcmp(label, "-") != 0) {
+            addSymbol(label, LC);
+        }
+
+        LC++;
+    }
+
+    for (int i = 0; i < symcount; i++) {
+        fprintf(symfile, "%s\t%d\n", symtab[i].name, symtab[i].address);
+    }
+}
+
+int main() {
+    FILE *input = fopen("input2.txt", "r");
+    FILE *symfile = fopen("symtab_only.txt", "w");
+
+    if (input == NULL) {
+        printf("Error: Cannot open input file.\n");
+        return 1;
+    }
+
+    generateSymbolTable(input, symfile);
+
+    fclose(input);
+    fclose(symfile);
+
+    printf("Symbol Table generated successfully.\n");
+    return 0;
+}
+
+Literal Table and Pool Table Generation Code
+
+This code focuses on generating the literal and pool tables.
+
+#include <stdio.h>
+#include <string.h>
+
+#define MAX_LITERALS 50
+#define MAX_POOL 50
+
+typedef struct {
+    char literal[20];
+    int address;
+} LiteralTable;
+
+LiteralTable littab[MAX_LITERALS];
+int poolTab[MAX_POOL];
+
+int litcount = 0, poolcount = 0, LC = 0;
+
+void addLiteral(char *literal) {
+    for (int i = 0; i < litcount; i++) {
+        if (strcmp(littab[i].literal, literal) == 0) {
+            return; // Literal already exists
+        }
+    }
+    strcpy(littab[litcount].literal, literal);
+    littab[litcount].address = -1;
+    litcount++;
+}
+
+void assignLiterals() {
+    for (int i = poolTab[poolcount]; i < litcount; i++) {
+        littab[i].address = LC;
+        LC++;
+    }
+    poolTab[poolcount++] = litcount;
+}
+
+void generateLiteralPoolTables(FILE *input, FILE *litfile, FILE *poolfile) {
+    char label[20], opcode[20], operand[20];
+
+    while (fscanf(input, "%s %s %s", label, opcode, operand) == 3) {
+        if (strcmp(opcode, "START") == 0) {
+            LC = atoi(operand);
+            continue;
+        }
+
+        if (operand[0] == '=') {
+            addLiteral(operand);
+        }
+
+        if (strcmp(opcode, "LTORG") == 0 || strcmp(opcode, "END") == 0) {
+            assignLiterals();
+        }
+
+        LC++;
+    }
+
+    for (int i = 0; i < litcount; i++) {
+        fprintf(litfile, "%s\t%d\n", littab[i].literal, littab[i].address);
+    }
+
+    for (int i = 0; i < poolcount; i++) {
+        fprintf(poolfile, "%d\n", poolTab[i]);
+    }
+}
+
+int main() {
+    FILE *input = fopen("input2.txt", "r");
+    FILE *litfile = fopen("littab_only.txt", "w");
+    FILE *poolfile = fopen("pooltab_only.txt", "w");
+
+    if (input == NULL) {
+        printf("Error: Cannot open input file.\n");
+        return 1;
+    }
+
+    generateLiteralPoolTables(input, litfile, poolfile);
+
+    fclose(input);
+    fclose(litfile);
+    fclose(poolfile);
+
+    printf("Literal Table and Pool Table generated successfully.\n");
+    return 0;
+}
+
+Intermediate Code Generation Code
+
+This code focuses on generating intermediate code only.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void generateIntermediateCode(FILE *input, FILE *ic) {
+    char label[20], opcode[20], operand[20];
+    int LC = 0;
+
+    while (fscanf(input, "%s %s %s", label, opcode, operand) == 3) {
+        if (strcmp(opcode, "START") == 0) {
+            LC = atoi(operand);
+            fprintf(ic, "(AD,01) (C,%d)\n", LC);
+            continue;
+        }
+
+        if (strcmp(opcode, "LTORG") == 0 || strcmp(opcode, "END") == 0) {
+            fprintf(ic, "(AD,02)\n");
+            continue;
+        }
+
+        fprintf(ic, "LC:%d %s %s\n", LC, opcode, operand);
+        LC++;
+    }
+}
+
+int main() {
+    FILE *input = fopen("input2.txt", "r");
+    FILE *ic = fopen("intermediate_only.txt", "w");
+
+    if (input == NULL) {
+        printf("Error: Cannot open input file.\n");
+        return 1;
+    }
+
+    generateIntermediateCode(input, ic);
+
+    fclose(input);
+    fclose(ic);
+
+    printf("Intermediate Code generated successfully.\n");
+    return 0;
+}
+
+Usage
+
+    Create input2.txt with your assembly program.
+    Compile and run each snippet separately to generate the required outputs:
+        Symbol Table: symtab_only.txt
+        Literal Table: littab_only.txt
+        Pool Table: pooltab_only.txt
+        Intermediate Code: intermediate_only.txt
+
+This modularized approach ensures each part is manageable and independent.
+
+
+
+
+
+
+
+
+
+1. Define and Populate the Symbol Table (SYMTAB)
+
+Task: Write a program to define a symbol table and populate it from a file.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+    char symbol[20];
+    int address;
+    char type; // A for absolute, R for relocatable
+} SYMTAB;
+
+#define MAX_SYMBOLS 100
+
+SYMTAB symtab[MAX_SYMBOLS];
+int symtab_size = 0;
+
+// Function to load the symbol table from a file
+void load_symtab(char *filename) {
+    FILE *fp = fopen(filename, "r");
+    if (!fp) {
+        printf("Error: Cannot open symbol table file\n");
+        exit(1);
+    }
+
+    while (fscanf(fp, "%s %d %c", symtab[symtab_size].symbol,
+                  &symtab[symtab_size].address,
+                  &symtab[symtab_size].type) != EOF) {
+        symtab_size++;
+    }
+    fclose(fp);
+}
+
+void display_symtab() {
+    printf("Symbol Table:\n");
+    printf("Symbol\tAddress\tType\n");
+    for (int i = 0; i < symtab_size; i++) {
+        printf("%s\t%d\t%c\n", symtab[i].symbol, symtab[i].address, symtab[i].type);
+    }
+}
+
+int main() {
+    load_symtab("symtab.txt");
+    display_symtab();
+    return 0;
+}
+
+2. Find Symbol Address in the Symbol Table
+
+Task: Write a program to search for a symbol in the symbol table and return its address.
+
+#include <stdio.h>
+#include <string.h>
+
+typedef struct {
+    char symbol[20];
+    int address;
+    char type;
+} SYMTAB;
+
+#define MAX_SYMBOLS 100
+
+SYMTAB symtab[MAX_SYMBOLS] = {
+    {"LABEL1", 1000, 'R'},
+    {"LABEL2", 2000, 'A'}
+};
+int symtab_size = 2;
+
+int find_symbol(char *symbol) {
+    for (int i = 0; i < symtab_size; i++) {
+        if (strcmp(symtab[i].symbol, symbol) == 0) {
+            return symtab[i].address;
+        }
+    }
+    return -1; // Not found
+}
+
+int main() {
+    char symbol[20];
+    printf("Enter symbol to search: ");
+    scanf("%s", symbol);
+    int address = find_symbol(symbol);
+    if (address != -1) {
+        printf("Address of %s: %d\n", symbol, address);
+    } else {
+        printf("Symbol not found.\n");
+    }
+    return 0;
+}
+
+3. Find Opcode for a Mnemonic
+
+Task: Write a program to retrieve the opcode for a given mnemonic.
+
+#include <stdio.h>
+#include <string.h>
+
+typedef struct {
+    char mnemonic[10];
+    int opcode;
+    int format;
+} OPTAB;
+
+#define MAX_OPCODES 10
+
+OPTAB optab[MAX_OPCODES] = {
+    {"ADD", 0x18, 3},
+    {"SUB", 0x1C, 3},
+    {"MUL", 0x20, 3},
+    {"DIV", 0x24, 3},
+    {"LOAD", 0x00, 3}
+};
+
+int find_opcode(char *mnemonic) {
+    for (int i = 0; i < MAX_OPCODES; i++) {
+        if (strcmp(optab[i].mnemonic, mnemonic) == 0) {
+            return optab[i].opcode;
+        }
+    }
+    return -1; // Not found
+}
+
+int main() {
+    char mnemonic[10];
+    printf("Enter mnemonic to search: ");
+    scanf("%s", mnemonic);
+    int opcode = find_opcode(mnemonic);
+    if (opcode != -1) {
+        printf("Opcode for %s: %X\n", mnemonic, opcode);
+    } else {
+        printf("Mnemonic not found.\n");
+    }
+    return 0;
+}
+
+4. Generate Object Code for an Instruction
+
+Task: Write a function to generate object code based on opcode, operand, and format.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+    char symbol[20];
+    int address;
+    char type;
+} SYMTAB;
+
+typedef struct {
+    char mnemonic[10];
+    int opcode;
+    int format;
+} OPTAB;
+
+#define MAX_SYMBOLS 100
+#define MAX_OPCODES 10
+
+SYMTAB symtab[MAX_SYMBOLS] = {
+    {"LABEL1", 1000, 'R'}
+};
+OPTAB optab[MAX_OPCODES] = {
+    {"ADD", 0x18, 3}
+};
+
+int find_opcode(char *mnemonic) {
+    for (int i = 0; i < MAX_OPCODES; i++) {
+        if (strcmp(optab[i].mnemonic, mnemonic) == 0) {
+            return optab[i].opcode;
+        }
+    }
+    return -1;
+}
+
+int find_symbol(char *symbol) {
+    for (int i = 0; i < MAX_SYMBOLS; i++) {
+        if (strcmp(symtab[i].symbol, symbol) == 0) {
+            return symtab[i].address;
+        }
+    }
+    return -1;
+}
+
+unsigned int generate_object_code(char *opcode, char *operand) {
+    unsigned int object_code = 0;
+    int op = find_opcode(opcode);
+    if (op == -1) return 0;
+
+    object_code = op << 16; // Add opcode
+    int addr = find_symbol(operand);
+    if (addr != -1) {
+        object_code |= addr;
+    }
+    return object_code;
+}
+
+int main() {
+    char opcode[10], operand[20];
+    printf("Enter opcode and operand: ");
+    scanf("%s %s", opcode, operand);
+
+    unsigned int object_code = generate_object_code(opcode, operand);
+    printf("Object code: %06X\n", object_code);
+    return 0;
+}
+
+5. Write the Object Program (Pass-2)
+
+Task: Combine everything to process intermediate code and generate the object program.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Assume previously defined structures, `symtab`, and `optab`
+
+void pass_two(char *ic_file, char *output_file) {
+    FILE *ic = fopen(ic_file, "r");
+    FILE *output = fopen(output_file, "w");
+
+    char line[100], opcode[20], operand[20];
+    int address;
+
+    while (fgets(line, sizeof(line), ic)) {
+        sscanf(line, "%d %s %s", &address, opcode, operand);
+        unsigned int obj_code = generate_object_code(opcode, operand);
+        fprintf(output, "%06X\n", obj_code);
+    }
+    fclose(ic);
+    fclose(output);
+}
+
+int main() {
+    pass_two("intermediate.txt", "object_program.txt");
+    printf("Object program generated.\n");
+    return 0;
+}
+
+Each of these snippets represents a sub-question/task. You can refine further depending on how the assignment questions are framed. Let me know if you need specific adjustments!
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Sub-Question 1: Write a program to process a macro and store its name in the Macro Name Table (MNT).
+
+Code:
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define MAX 50
+
+typedef struct {
+    char name[20];
+    int mdtIndex;
+    int paramCount;
+} MNT;
+
+MNT mnt[MAX];
+int mntCount = 0;
+
+void processMacro(FILE *fp) {
+    char line[100], macroName[20];
+    
+    // Read MACRO line
+    fscanf(fp, "%s %s", line, macroName);
+    
+    // Update MNT
+    strcpy(mnt[mntCount].name, macroName);
+    mnt[mntCount].mdtIndex = 0; // Placeholder for MDT index
+    mnt[mntCount].paramCount = 0; // Placeholder for parameter count
+    mntCount++;
+}
+
+int main() {
+    FILE *input = fopen("input4.txt", "r");
+    if (!input) {
+        printf("Error opening input file\n");
+        return 1;
+    }
+    
+    char line[100];
+    while (fgets(line, sizeof(line), input)) {
+        if (strncmp(line, "MACRO", 5) == 0) {
+            processMacro(input);
+        }
+    }
+    fclose(input);
+
+    // Print MNT
+    printf("Macro Name Table:\n");
+    printf("Macro Name\n");
+    for (int i = 0; i < mntCount; i++) {
+        printf("%s\n", mnt[i].name);
+    }
+    return 0;
+}
+
+Sub-Question 2: Write a program to process macro parameters and store them in the Parameter Name Table (PNTAB).
+
+Code:
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define MAX 50
+
+typedef struct {
+    char name[20];
+    int index;
+} PNTAB;
+
+PNTAB pntab[MAX];
+int pntabCount = 0;
+
+void processParameters(FILE *fp) {
+    char line[100];
+    fgets(line, sizeof(line), fp);
+    
+    // Tokenize and store parameters
+    char *token = strtok(line, " ,\n");
+    while (token != NULL) {
+        if (token[0] == '&') {
+            strcpy(pntab[pntabCount].name, token);
+            pntab[pntabCount].index = pntabCount;
+            pntabCount++;
+        }
+        token = strtok(NULL, " ,\n");
+    }
+}
+
+int main() {
+    FILE *input = fopen("input4.txt", "r");
+    if (!input) {
+        printf("Error opening input file\n");
+        return 1;
+    }
+
+    char line[100];
+    while (fgets(line, sizeof(line), input)) {
+        if (strncmp(line, "MACRO", 5) == 0) {
+            fgets(line, sizeof(line), input); // Skip macro name line
+            processParameters(input);
+        }
+    }
+    fclose(input);
+
+    // Print PNTAB
+    printf("Parameter Name Table:\n");
+    printf("Parameter\tIndex\n");
+    for (int i = 0; i < pntabCount; i++) {
+        printf("%s\t\t%d\n", pntab[i].name, pntab[i].index);
+    }
+    return 0;
+}
+
+Sub-Question 3: Write a program to store macro definitions in the Macro Definition Table (MDT).
+
+Code:
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define MAX 50
+
+char mdt[MAX][100];
+int mdtCount = 0;
+
+void storeMacroDefinition(FILE *fp) {
+    char line[100];
+    
+    // Read lines until "MEND" is encountered
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "MEND", 4) == 0) {
+            strcpy(mdt[mdtCount++], "MEND\n");
+            break;
+        }
+        strcpy(mdt[mdtCount++], line);
+    }
+}
+
+int main() {
+    FILE *input = fopen("input4.txt", "r");
+    if (!input) {
+        printf("Error opening input file\n");
+        return 1;
+    }
+
+    char line[100];
+    while (fgets(line, sizeof(line), input)) {
+        if (strncmp(line, "MACRO", 5) == 0) {
+            fgets(line, sizeof(line), input); // Skip macro name and parameter line
+            storeMacroDefinition(input);
+        }
+    }
+    fclose(input);
+
+    // Print MDT
+    printf("Macro Definition Table:\n");
+    printf("Index\tDefinition\n");
+    for (int i = 0; i < mdtCount; i++) {
+        printf("%d\t%s", i, mdt[i]);
+    }
+    return 0;
+}
+
+Let me know if you'd like more subquestions or variations!
+
+
+
+
+
+
+
+
+
+
+Sub-Question 1: Define Token Types and Keywords.
+
+Code:
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+// Token Types Enum
+enum TokenType {
+    KEYWORD, IDENTIFIER, CONSTANT, 
+    OPERATOR, SPECIAL_SYMBOL, STRING, 
+    PREPROCESSOR, COMMENT, UNKNOWN
+};
+
+// Keywords Array
+char *keywords[] = {
+    "int", "char", "float", "double", "void", 
+    "if", "else", "while", "for", "return", 
+    "switch", "case", "break", "continue"
+};
+
+Explanation:
+
+    Token Types Enum: This defines the different token types such as keywords, identifiers, constants, operators, special symbols, strings, preprocessor directives, comments, and unknown tokens.
+    Keywords Array: The array keywords[] contains all the keywords that the lexical analyzer will check for when scanning the input.
+
+Sub-Question 2: Define a Function to Identify Token Type.
+
+Code:
+
+// Function to identify token type
+enum TokenType getTokenType(char *token) {
+    // Check Keywords
+    for (int i = 0; i < sizeof(keywords)/sizeof(keywords[0]); i++) {
+        if (strcmp(token, keywords[i]) == 0) 
+            return KEYWORD;
+    }
+
+    // Check Identifier
+    if (isalpha(token[0]) || token[0] == '_') 
+        return IDENTIFIER;
+
+    // Check Constant
+    if (isdigit(token[0])) 
+        return CONSTANT;
+
+    // Check Operators and Special Symbols
+    char *operators[] = {"+", "-", "*", "/", "=", "==", "!="};
+    char *special_symbols[] = {"{", "}", "(", ")", ";", ","};
+
+    for (int i = 0; i < sizeof(operators)/sizeof(operators[0]); i++) {
+        if (strcmp(token, operators[i]) == 0) 
+            return OPERATOR;
+    }
+
+    for (int i = 0; i < sizeof(special_symbols)/sizeof(special_symbols[0]); i++) {
+        if (strcmp(token, special_symbols[i]) == 0) 
+            return SPECIAL_SYMBOL;
+    }
+
+    return UNKNOWN;
+}
+
+Explanation:
+
+    Token Identification: The function getTokenType checks the type of a given token. It first checks if the token matches any keyword, identifier, or constant. Then it checks if it's an operator or special symbol. If none of these, the token is categorized as UNKNOWN.
+
+Sub-Question 3: Implement Lexical Analysis Function.
+
+Code:
+
+// Lexical Analyzer Function
+void lexicalAnalyze(FILE *input, FILE *output) {
+    char token[100];
+    int ch;
+
+    while ((ch = fgetc(input)) != EOF) {
+        // Skip Whitespaces
+        if (isspace(ch)) continue;
+
+        // Preprocessor Directives
+        if (ch == '#') {
+            ungetc(ch, input);
+            fscanf(input, "%[^\n]", token);
+            fprintf(output, "PREPROCESSOR: %s\n", token);
+            continue;
+        }
+
+        // Comments
+        if (ch == '/' && (ch = fgetc(input)) == '/') {
+            ungetc(ch, input);
+            fscanf(input, "%[^\n]", token);
+            fprintf(output, "COMMENT: %s\n", token);
+            continue;
+        }
+
+        // Strings
+        if (ch == '"') {
+            int i = 0;
+            while ((ch = fgetc(input)) != '"') 
+                token[i++] = ch;
+            token[i] = '\0';
+            fprintf(output, "STRING: %s\n", token);
+            continue;
+        }
+
+        // Tokens
+        ungetc(ch, input);
+        fscanf(input, "%s", token);
+        enum TokenType type = getTokenType(token);
+
+        switch (type) {
+            case KEYWORD: 
+                fprintf(output, "KEYWORD: %s\n", token); 
+                break;
+            case IDENTIFIER: 
+                fprintf(output, "IDENTIFIER: %s\n", token); 
+                break;
+            case CONSTANT: 
+                fprintf(output, "CONSTANT: %s\n", token); 
+                break;
+            case OPERATOR: 
+                fprintf(output, "OPERATOR: %s\n", token); 
+                break;
+            case SPECIAL_SYMBOL: 
+                fprintf(output, "SPECIAL SYMBOL: %s\n", token); 
+                break;
+            default: 
+                fprintf(output, "UNKNOWN: %s\n", token);
+        }
+    }
+}
+
+Explanation:
+
+    Lexical Analysis: The lexicalAnalyze function processes the input character by character:
+        It skips whitespaces.
+        It handles preprocessor directives (lines starting with #).
+        It handles single-line comments (lines starting with //).
+        It processes string literals.
+        It extracts and classifies tokens (keywords, identifiers, constants, operators, special symbols, or unknown).
+
+Sub-Question 4: Implement Main Function to Read Input and Write Output.
+
+Code:
+
+int main() {
+    FILE *input = fopen("input6.c", "r");
+    FILE *output = fopen("tokens.txt", "w");
+
+    if (!input || !output) {
+        printf("File error!\n");
+        return 1;
+    }
+
+    lexicalAnalyze(input, output);
+
+    fclose(input);
+    fclose(output);
+    return 0;
+}
+
+Explanation:
+
+    Main Function: The main function opens the input file (input6.c) and the output file (tokens.txt).
+        It checks for file errors.
+        It calls lexicalAnalyze to process the input and write the tokens to the output file.
+        Finally, it closes the files.
+
+Final Breakdown of the Process:
+
+    Token Types and Keywords: The program defines different token types and stores keywords in an array.
+    Token Type Identification: The function getTokenType identifies the type of each token based on the predefined lists of keywords, constants, operators, and symbols.
+    Lexical Analysis: The lexicalAnalyze function processes the input character by character, identifies tokens, and writes the results to an output file.
+    Main Function: The main function reads the input file, processes it with lexicalAnalyze, and writes the tokens to an output file.
