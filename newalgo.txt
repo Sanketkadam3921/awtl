@@ -1,0 +1,432 @@
+import pandas as pd
+from apyori import apriori
+import matplotlib.pyplot as plt
+
+# Load the data
+file_path = '/home/sanket/Desktop/Sheet1.csv' 
+df = pd.read_csv(file_path)
+# Display a few rows for understanding
+df.head(3)
+
+# Prepare records for the Apriori algorithm
+records = []
+for i in range(0, len(df)):
+    records.append([str(df.values[i, j]) for j in [1, 2, 3, 4, 5, 12]])  
+
+# Apply Apriori algorithm
+association_rules = apriori(records, min_support=0.3, min_confidence=0.7, min_lift=1.2, min_length=2)
+association_results = list(association_rules)
+
+# Print the number of rules found
+print(f"Number of association rules found: {len(association_results)}")
+
+# Initialize lists to store rule metrics
+support = []
+confidence = []
+lift = []
+rules = []
+
+# Extract rules and their metrics
+print("Association Rules:")
+for item in association_results:
+    pair = item[0]
+    items = [x for x in pair]
+    support.append(item[1])
+    confidence.append(item[2][0][2])
+    lift.append(item[2][0][3])
+    rules.append(f"{items[0]} -> {items[1]}")
+    
+    print(f"Rule: {items[0]} -> {items[1]}")
+    print(f"Support: {item[1]}")
+    print(f"Confidence: {item[2][0][2]}")
+    print(f"Lift: {item[2][0][3]}")
+    print("=====================================")
+
+# Visualization: Bar Charts for Support, Confidence, and Lift
+def plot_support_confidence_lift(support, confidence, lift):
+    plt.figure(figsize=(12, 6))
+    
+    # Bar chart for support
+    plt.subplot(1, 3, 1)
+    plt.bar(range(len(support)), support, color='blue', alpha=0.7)
+    plt.title('Support')
+    plt.xlabel('Rule Index')
+    plt.ylabel('Support')
+    
+    # Bar chart for confidence
+    plt.subplot(1, 3, 2)
+    plt.bar(range(len(confidence)), confidence, color='green', alpha=0.7)
+    plt.title('Confidence')
+    plt.xlabel('Rule Index')
+    plt.ylabel('Confidence')
+    
+    # Bar chart for lift
+    plt.subplot(1, 3, 3)
+    plt.bar(range(len(lift)), lift, color='red', alpha=0.7)
+    plt.title('Lift')
+    plt.xlabel('Rule Index')
+    plt.ylabel('Lift')
+    
+    plt.tight_layout()
+    plt.show()
+
+# Call the visualization function
+plot_support_confidence_lift(support, confidence, lift)
+
+
+
+import pandas as pd
+from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import classification_report
+
+# Load the dataset
+file_path = '/home/sanket/Desktop/Daily_Weather_Dataset.csv' 
+data = pd.read_csv(file_path)
+# Remove the 'number' column, as it's not a feature
+data.drop(['number'], axis=1, inplace=True)
+
+# Drop rows with missing values
+data = data.dropna()
+
+# Print the first 5 rows of the cleaned data
+print("Sample of the cleaned data :")
+print(data.head())
+
+# Create a target label: Binarizing the relative_humidity_3pm to 0 or 1
+data['high_humidity_label'] = (data['relative_humidity_3pm'] > 24.99).astype(int)
+
+# Select features for the model
+morning_features = [
+    'air_pressure_9am', 'air_temp_9am', 'avg_wind_direction_9am',
+    'avg_wind_speed_9am', 'max_wind_direction_9am', 'max_wind_speed_9am',
+    'rain_accumulation_9am', 'rain_duration_9am'
+]
+
+# Create feature matrix (X) and target vector (y)
+X = data[morning_features]
+y = data['high_humidity_label']
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=324)
+
+# Train the Decision Tree model
+humidity_classifier = DecisionTreeClassifier(max_leaf_nodes=10, random_state=0)
+humidity_classifier.fit(X_train, y_train)
+
+# Predict on the test set
+predictions = humidity_classifier.predict(X_test)
+
+# Calculate and print the accuracy as a percentage
+accuracy = accuracy_score(y_test, predictions)
+accuracy_percentage = accuracy * 100
+print(f"\nAccuracy : {accuracy_percentage:.2f}%")
+
+# Plotting the decision tree
+plt.figure(figsize=(30, 20), dpi=50)
+plot_tree(humidity_classifier, 
+          feature_names=morning_features, 
+          class_names=['Low', 'High'], 
+          filled=True, 
+          fontsize=14, 
+          rounded=True, 
+          proportion=True)  
+plt.title('Decision Tree for Humidity Prediction',fontsize=20)
+plt.show()
+
+# Compute confusion matrix
+conf_matrix = confusion_matrix(y_test, predictions)
+
+print("\nConfusion Matrix :\n", conf_matrix)
+
+# Plot confusion matrix
+plt.figure(figsize=(6,4))
+sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues", xticklabels=['Low Humidity', 'High Humidity'], yticklabels=['Low Humidity', 'High Humidity'])
+plt.ylabel('Actual')
+plt.xlabel('Predicted')
+plt.title('Confusion Matrix')
+plt.show()
+
+# Print the classification report
+print("\nClassification Report :")
+print(classification_report(y_test, predictions, target_names=['Low Humidity', 'High Humidity']))
+
+
+
+# Step 1: Import Required Libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler
+from scipy.cluster.hierarchy import dendrogram, linkage
+from sklearn.cluster import AgglomerativeClustering
+
+# Step 2: Load the Dataset
+# Make sure to change the path to where your CSV file is located
+file_path = '/home/sanket/Desktop/Mall_Customers.csv' 
+data = pd.read_csv(file_path)
+
+
+# Display the first few rows
+print(data.head())
+print("\n")
+
+# Step 3: Preprocess the Data
+# Select relevant features (excluding CustomerID and Genre)
+features = data[['Annual Income (k$)', 'Spending Score (1-100)']]
+
+# Standardize the features
+scaler = StandardScaler()
+scaled_features = scaler.fit_transform(features)
+
+# Step 4: Perform Hierarchical Clustering
+# Compute the linkage matrix
+linkage_matrix = linkage(scaled_features, method='ward')
+
+# Create a dendrogram
+plt.figure(figsize=(10, 7))
+dendrogram(linkage_matrix, leaf_rotation=90)
+plt.title('Hierarchical Clustering Dendrogram')
+plt.xlabel('Index')
+plt.ylabel('Distance')
+plt.show()
+
+# Step 5: Fit the Hierarchical Clustering Model
+n_clusters = 5  # Specify the number of clusters
+hc = AgglomerativeClustering(n_clusters=n_clusters, linkage='ward')  # Remove affinity
+data['Cluster'] = hc.fit_predict(scaled_features)
+
+# Display the first few rows with cluster assignments
+print(data.head())
+
+# Step 6: Visualize the Clusters
+plt.figure(figsize=(10, 7))
+sns.scatterplot(x='Annual Income (k$)', y='Spending Score (1-100)', hue='Cluster', data=data, palette='Set1', s=100)
+plt.title('Customer Segmentation using Hierarchical Clustering')
+plt.xlabel('Annual Income (k$)')
+plt.ylabel('Spending Score (1-100)')
+plt.legend()
+plt.show()
+
+
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+from sklearn.metrics import silhouette_score
+from sklearn.decomposition import PCA
+import seaborn as sns
+
+# Load the dataset
+file_path = '/home/sanket/Desktop/Mall_Customers.csv' 
+data = pd.read_csv(file_path)
+# Select relevant features for clustering
+features = data[['Age', 'Annual Income (k$)', 'Spending Score (1-100)']]
+
+# Handle potential NaN values
+features = features.fillna(0)
+
+# Standardize the data
+scaler = StandardScaler()
+scaled_features = scaler.fit_transform(features)
+
+# Determine the optimal number of clusters using the Elbow method and Silhouette score
+inertia = []
+sil_scores = []  
+K = range(2, 21)  # Extend K range for better search
+
+for k in K:
+    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+    kmeans.fit(scaled_features)
+    inertia.append(kmeans.inertia_)
+    
+    silhouette_avg = silhouette_score(scaled_features, kmeans.labels_)
+    sil_scores.append(silhouette_avg)
+    print(f'K={k}, Silhouette Score: {silhouette_avg:.4f}') 
+
+# Plot the Elbow method graph for Inertia
+plt.figure(figsize=(6, 5))
+plt.plot(K, inertia, 'bo-')
+plt.xlabel('Number of clusters (K)')
+plt.ylabel('Inertia')
+plt.title('Elbow Method For Optimal K')
+plt.grid()
+plt.show()
+
+# Plot the Silhouette score graph
+plt.figure(figsize=(6, 5))
+plt.plot(K, sil_scores, 'go-')
+plt.xlabel('Number of clusters (K)')
+plt.ylabel('Silhouette Score')
+plt.title('Silhouette Score For Optimal K')
+plt.grid()
+plt.show()
+
+# Choose the optimal number of clusters based on silhouette score
+optimal_k = K[sil_scores.index(max(sil_scores))]
+print(f'Optimal number of clusters (K): {optimal_k}')
+
+kmeans = KMeans(n_clusters=optimal_k, random_state=42, n_init=10)
+data['Cluster'] = kmeans.fit_predict(scaled_features)
+
+# Count the number of instances in each cluster
+cluster_counts = data['Cluster'].value_counts()
+print(f'Counts of instances per cluster:\n{cluster_counts}')
+
+# Calculate and print the silhouette score for the chosen number of clusters
+final_silhouette_score = silhouette_score(scaled_features, data['Cluster'])
+print(f'Silhouette Score for K={optimal_k}: {final_silhouette_score:.4f}')
+
+# Print basic statistics for each cluster
+for cluster in range(optimal_k):
+    print(f'\nCluster {cluster} statistics:')
+    print(data[data['Cluster'] == cluster][['Age', 'Annual Income (k$)', 'Spending Score (1-100)']].describe())
+
+# Save the results back to a new CSV file with cluster labels
+output_path = r"C:\\Users\DELL\\OneDrive\\Documents\\output_file.csv"
+data.to_csv(output_path, index=False)
+print(f'Clustered data saved to {output_path}')
+
+# Perform PCA for visualization
+pca = PCA(n_components=2)
+pca_result = pca.fit_transform(scaled_features)
+
+# Scatter plot of clusters
+plt.figure(figsize=(10, 6))
+plt.scatter(pca_result[:, 0], pca_result[:, 1], c=data['Cluster'], cmap='viridis', s=50)
+plt.title(f'Customerhier Clusters (K={optimal_k}) - PCA Visualization')
+plt.xlabel('PCA Component 1 (Age, Income, Spending Score Combined)')
+plt.ylabel('PCA Component 2 (Age, Income, Spending Score Combined)')
+
+# Mark the centroids
+centroids = pca.transform(kmeans.cluster_centers_)
+plt.scatter(centroids[:, 0], centroids[:, 1], c='red', marker='X', s=200, label='Centroids')
+plt.legend()
+plt.grid()
+plt.show()
+
+# Set the aesthetics for the plots
+sns.set(style="whitegrid")
+
+# Create individual figures for each histogram and boxplot
+
+# Histogram for Age
+plt.figure(figsize=(10, 6))
+sns.histplot(data=data, x='Age', hue='Cluster', multiple='stack', bins=10, kde=True, color='skyblue')
+plt.title('Age Distribution by Cluster')
+plt.xlabel('Age')
+plt.ylabel('Frequency')
+plt.show()
+
+# Boxplot for Age
+plt.figure(figsize=(10, 6))
+sns.boxplot(data=data, x='Cluster', y='Age')
+plt.title('Age by Cluster')
+plt.xlabel('Cluster')
+plt.ylabel('Age')
+plt.show()
+
+# Histogram for Annual Income
+plt.figure(figsize=(10, 6))
+sns.histplot(data=data, x='Annual Income (k$)', hue='Cluster', multiple='stack', bins=10, kde=True, color='salmon')
+plt.title('Annual Income Distribution by Cluster')
+plt.xlabel('Annual Income (k$)')
+plt.ylabel('Frequency')
+plt.show()
+
+# Boxplot for Annual Income
+plt.figure(figsize=(10, 6))
+sns.boxplot(data=data, x='Cluster', y='Annual Income (k$)')
+plt.title('Annual Income by Cluster')
+plt.xlabel('Cluster')
+plt.ylabel('Annual Income (k$)')
+plt.show()
+
+# Histogram for Spending Score
+plt.figure(figsize=(10, 6))
+sns.histplot(data=data, x='Spending Score (1-100)', hue='Cluster', multiple='stack', bins=10, kde=True, color='purple')
+plt.title('Spending Score Distribution by Cluster')
+plt.xlabel('Spending Score (1-100)')
+plt.ylabel('Frequency')
+plt.show()
+
+# Boxplot for Spending Score
+plt.figure(figsize=(10, 6))
+sns.boxplot(data=data, x='Cluster', y='Spending Score (1-100)')
+plt.title('Spending Score by Cluster')
+plt.xlabel('Cluster')
+plt.ylabel('Spending Score (1-100)')
+plt.show()
+
+
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Load the dataset
+file_path = '/home/sanket/Desktop/data.csv' 
+data = pd.read_csv(file_path)  # Update with your dataset path
+print(data.head())
+
+# Drop the unused column
+data = data.drop(columns=['Unnamed: 32'], errors='ignore')
+
+# Encode the diagnosis column
+data['diagnosis'] = data['diagnosis'].map({'M': 1, 'B': 0})
+
+# Check for missing values
+print("\nMissing values in each column:\n", data.isnull().sum())
+
+# Drop rows with NaN values
+data = data.dropna()
+
+# Check the shape after dropping
+print("\nDataset shape after dropping NaN values:", data.shape)
+
+# Ensure we have data left before proceeding
+if data.shape[0] == 0:
+    print("No data left after dropping NaN values. Please check your dataset.")
+else:
+    # Separate features and target variable
+    X = data.drop(['id', 'diagnosis'], axis=1)
+    y = data['diagnosis']
+
+    # Split the data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Create and train the Gaussian Naive Bayes model
+    model = GaussianNB()
+    model.fit(X_train, y_train)
+
+    # Make predictions
+    y_pred = model.predict(X_test)
+
+    # Calculate accuracy
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f'\nAccuracy: {accuracy * 100:.2f}%')
+
+    # Classification report
+    print("\n")
+    print(classification_report(y_test, y_pred))
+
+    # Confusion matrix
+    cm = confusion_matrix(y_test, y_pred)
+    print('Confusion Matrix :')
+    print(cm)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign', 'Malignant'], yticklabels=['Benign', 'Malignant'])
+    plt.ylabel('Actual')
+    plt.xlabel('Predicted')
+    plt.title('Confusion Matrix')
+    plt.show()
+
+
+
+

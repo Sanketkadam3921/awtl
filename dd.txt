@@ -1,0 +1,1618 @@
+1--
+-- Order Management Data Warehouse Schema
+
+-- Dimension Tables
+CREATE TABLE dim_customer (
+    customer_key SERIAL PRIMARY KEY,
+    customer_id VARCHAR(50) UNIQUE NOT NULL,
+    customer_name VARCHAR(255) NOT NULL,
+    shipping_address TEXT,
+    billing_address TEXT,
+    country VARCHAR(100)
+);
+
+CREATE TABLE dim_product (
+    product_key SERIAL PRIMARY KEY,
+    product_id VARCHAR(50) UNIQUE NOT NULL,
+    product_name VARCHAR(255) NOT NULL,
+    product_category VARCHAR(100),
+    product_subcategory VARCHAR(100)
+);
+
+CREATE TABLE dim_sales_representative (
+    rep_key SERIAL PRIMARY KEY,
+    rep_id VARCHAR(50) UNIQUE NOT NULL,
+    rep_name VARCHAR(255) NOT NULL,
+    department VARCHAR(100),
+    hire_date DATE
+);
+
+CREATE TABLE dim_promotion (
+    promotion_key SERIAL PRIMARY KEY,
+    promotion_id VARCHAR(50) UNIQUE NOT NULL,
+    promotion_name VARCHAR(255),
+    promotion_type VARCHAR(100),
+    start_date DATE,
+    end_date DATE
+);
+
+CREATE TABLE dim_date (
+    date_key SERIAL PRIMARY KEY,
+    full_date DATE NOT NULL,
+    year INTEGER,
+    quarter VARCHAR(2),
+    month INTEGER,
+    month_name VARCHAR(20),
+    day_of_month INTEGER,
+    day_of_week VARCHAR(20),
+    week_of_year INTEGER
+);
+
+-- Fact Table
+CREATE TABLE fact_order (
+    order_key SERIAL PRIMARY KEY,
+    order_id VARCHAR(50) UNIQUE NOT NULL,
+    customer_key INTEGER REFERENCES dim_customer(customer_key),
+    product_key INTEGER REFERENCES dim_product(product_key),
+    rep_key INTEGER REFERENCES dim_sales_representative(rep_key),
+    promotion_key INTEGER REFERENCES dim_promotion(promotion_key),
+    order_date_key INTEGER REFERENCES dim_date(date_key),
+    requested_ship_date_key INTEGER REFERENCES dim_date(date_key),
+    quantity INTEGER,
+    gross_amount DECIMAL(12,2),
+    net_amount DECIMAL(12,2),
+    currency VARCHAR(10)
+);
+
+-- Currency Exchange Rate Dimension
+CREATE TABLE dim_currency_exchange (
+    currency_key SERIAL PRIMARY KEY,
+    from_currency VARCHAR(10),
+    to_currency VARCHAR(10),
+    exchange_rate DECIMAL(10,4),
+    valid_from DATE,
+    valid_to DATE
+);
+
+-- Inserting Sample Data
+-- Customers
+INSERT INTO dim_customer (customer_id, customer_name, shipping_address, billing_address, country)
+VALUES 
+    ('CUST001', 'Acme Corporation', '123 Business St, New York, NY', '123 Business St, New York, NY', 'USA'),
+    ('CUST002', 'Global Traders', '456 International Blvd, Dubai', '456 International Blvd, Dubai', 'UAE');
+
+-- Products
+INSERT INTO dim_product (product_id, product_name, product_category, product_subcategory)
+VALUES 
+    ('PROD001', 'Laptop X200', 'Electronics', 'Computers'),
+    ('PROD002', 'Smartphone Pro', 'Electronics', 'Mobile Devices');
+
+-- Sales Representatives
+INSERT INTO dim_sales_representative (rep_id, rep_name, department, hire_date)
+VALUES 
+    ('REP001', 'John Smith', 'Sales', '2020-01-15'),
+    ('REP002', 'Emily Davis', 'Sales', '2019-05-22');
+
+-- Promotions
+INSERT INTO dim_promotion (promotion_id, promotion_name, promotion_type, start_date, end_date)
+VALUES 
+    ('PROMO001', 'Summer Sale', 'Seasonal Discount', '2023-06-01', '2023-08-31'),
+    ('PROMO002', 'New Customer Offer', 'First Purchase', '2023-01-01', '2023-12-31');
+
+-- Date Dimension (Sample Data)
+INSERT INTO dim_date (full_date, year, quarter, month, month_name, day_of_month, day_of_week, week_of_year)
+VALUES 
+    ('2023-07-15', 2023, 'Q3', 7, 'July', 15, 'Saturday', 28),
+    ('2023-08-20', 2023, 'Q3', 8, 'August', 20, 'Sunday', 34);
+
+-- Currency Exchange Rates
+INSERT INTO dim_currency_exchange (from_currency, to_currency, exchange_rate, valid_from, valid_to)
+VALUES 
+    ('USD', 'AED', 3.6725, '2023-01-01', '2023-12-31'),
+    ('USD', 'EUR', 0.92, '2023-01-01', '2023-12-31');
+
+-- Fact Order Sample Data
+INSERT INTO fact_order (
+    order_id, customer_key, product_key, rep_key, promotion_key, 
+    order_date_key, requested_ship_date_key, quantity, 
+    gross_amount, net_amount, currency
+)
+VALUES 
+    (
+        'ORD001', 
+        (SELECT customer_key FROM dim_customer WHERE customer_id = 'CUST001'),
+        (SELECT product_key FROM dim_product WHERE product_id = 'PROD001'),
+        (SELECT rep_key FROM dim_sales_representative WHERE rep_id = 'REP001'),
+        (SELECT promotion_key FROM dim_promotion WHERE promotion_id = 'PROMO001'),
+        (SELECT date_key FROM dim_date WHERE full_date = '2023-07-15'),
+        (SELECT date_key FROM dim_date WHERE full_date = '2023-08-20'),
+        2, 
+        2000.00, 
+        1800.00, 
+        'USD'
+    ),
+    (
+        'ORD002', 
+        (SELECT customer_key FROM dim_customer WHERE customer_id = 'CUST002'),
+        (SELECT product_key FROM dim_product WHERE product_id = 'PROD002'),
+        (SELECT rep_key FROM dim_sales_representative WHERE rep_id = 'REP002'),
+        (SELECT promotion_key FROM dim_promotion WHERE promotion_id = 'PROMO002'),
+        (SELECT date_key FROM dim_date WHERE full_date = '2023-07-15'),
+        (SELECT date_key FROM dim_date WHERE full_date = '2023-08-20'),
+        1, 
+        1500.00, 
+        1350.00, 
+        'AED'
+    );
+
+-- Analytical Queries
+
+-- 1. Net Order Amount per Customer
+SELECT 
+    c.customer_name, 
+    SUM(f.net_amount) AS total_net_amount,
+    f.currency
+FROM 
+    fact_order f
+JOIN 
+    dim_customer c ON f.customer_key = c.customer_key
+GROUP BY 
+    c.customer_name, f.currency
+ORDER BY 
+    total_net_amount DESC;
+
+-- 2. Net Order Amount per Product
+SELECT 
+    p.product_name, 
+    p.product_category,
+    SUM(f.net_amount) AS total_net_amount,
+    SUM(f.quantity) AS total_quantity
+FROM 
+    fact_order f
+JOIN 
+    dim_product p ON f.product_key = p.product_key
+GROUP BY 
+    p.product_name, p.product_category
+ORDER BY 
+    total_net_amount DESC;
+
+-- 3. Performance of Sales Representatives
+SELECT 
+    sr.rep_name, 
+    COUNT(f.order_key) AS total_orders,
+    SUM(f.net_amount) AS total_net_sales,
+    AVG(f.net_amount) AS average_order_value
+FROM 
+    fact_order f
+JOIN 
+    dim_sales_representative sr ON f.rep_key = sr.rep_key
+GROUP BY 
+    sr.rep_name
+ORDER BY 
+    total_net_sales DESC;
+
+-- 4. Promotion Effectiveness
+SELECT 
+    pr.promotion_name, 
+    pr.promotion_type,
+    SUM(f.net_amount) AS total_net_amount,
+    COUNT(f.order_key) AS total_orders
+FROM 
+    fact_order f
+JOIN 
+    dim_promotion pr ON f.promotion_key = pr.promotion_key
+GROUP BY 
+    pr.promotion_name, pr.promotion_type
+ORDER BY 
+    total_net_amount DESC;
+
+-- 5. Cross-Currency Analysis with Exchange Rates
+WITH converted_orders AS (
+    SELECT 
+        f.order_id,
+        c.customer_name,
+        f.net_amount,
+        f.currency,
+        ce.to_currency,
+        f.net_amount * ce.exchange_rate AS converted_amount
+    FROM 
+        fact_order f
+    JOIN 
+        dim_customer c ON f.customer_key = c.customer_key
+    JOIN 
+        dim_currency_exchange ce ON f.currency = ce.from_currency
+)
+SELECT 
+    customer_name,
+    currency,
+    to_currency,
+    SUM(net_amount) AS original_total,
+    SUM(converted_amount) AS converted_total
+FROM 
+    converted_orders
+GROUP BY 
+    customer_name, currency, to_currency;
+    
+    
+    
+    
+    
+    2
+    
+2
+
+-- Book Management Data Warehouse Schema
+
+-- Dimension Tables
+CREATE TABLE dim_book_type (
+    book_type_key SERIAL PRIMARY KEY,
+    book_type_id VARCHAR(50) UNIQUE NOT NULL,
+    book_type_name VARCHAR(100) NOT NULL,
+    category VARCHAR(100),
+    description TEXT
+);
+
+CREATE TABLE dim_location (
+    location_key SERIAL PRIMARY KEY,
+    location_id VARCHAR(50) UNIQUE NOT NULL,
+    shelf_number VARCHAR(50),
+    section VARCHAR(100),
+    library_branch VARCHAR(100),
+    city VARCHAR(100),
+    country VARCHAR(100)
+);
+
+CREATE TABLE dim_author (
+    author_key SERIAL PRIMARY KEY,
+    author_id VARCHAR(50) UNIQUE NOT NULL,
+    author_name VARCHAR(255) NOT NULL,
+    age INTEGER,
+    country VARCHAR(100),
+    genre VARCHAR(100)
+);
+
+CREATE TABLE dim_publication (
+    publication_key SERIAL PRIMARY KEY,
+    publication_id VARCHAR(50) UNIQUE NOT NULL,
+    publication_name VARCHAR(255) NOT NULL,
+    country VARCHAR(100),
+    founding_year INTEGER
+);
+
+CREATE TABLE dim_date (
+    date_key SERIAL PRIMARY KEY,
+    full_date DATE NOT NULL,
+    year INTEGER,
+    quarter VARCHAR(2),
+    month INTEGER,
+    month_name VARCHAR(20),
+    day_of_month INTEGER,
+    day_of_week VARCHAR(20)
+);
+
+-- Fact Table
+CREATE TABLE fact_book_sales (
+    book_sales_key SERIAL PRIMARY KEY,
+    book_id VARCHAR(50) UNIQUE NOT NULL,
+    book_type_key INTEGER REFERENCES dim_book_type(book_type_key),
+    location_key INTEGER REFERENCES dim_location(location_key),
+    author_key INTEGER REFERENCES dim_author(author_key),
+    publication_key INTEGER REFERENCES dim_publication(publication_key),
+    date_key INTEGER REFERENCES dim_date(date_key),
+    book_title VARCHAR(255),
+    quantity_in_stock INTEGER,
+    cost_price DECIMAL(10,2),
+    selling_price DECIMAL(10,2),
+    total_profit DECIMAL(10,2)
+);
+
+-- Inserting Sample Data
+
+-- Book Types
+INSERT INTO dim_book_type (book_type_id, book_type_name, category, description)
+VALUES 
+    ('BT001', 'Fiction', 'Novel', 'Fictional literature'),
+    ('BT002', 'Non-Fiction', 'Academic', 'Educational and research books'),
+    ('BT003', 'Reference', 'Encyclopedia', 'Reference materials');
+
+-- Locations
+INSERT INTO dim_location (location_id, shelf_number, section, library_branch, city, country)
+VALUES 
+    ('LOC001', 'A1', 'Fiction', 'Main Library', 'Pune', 'India'),
+    ('LOC002', 'B2', 'Non-Fiction', 'University Library', 'Mumbai', 'India');
+
+-- Authors
+INSERT INTO dim_author (author_id, author_name, age, country, genre)
+VALUES 
+    ('AUTH001', 'Chetan Bhagat', 45, 'India', 'Contemporary Fiction'),
+    ('AUTH002', 'Yuval Noah Harari', 38, 'Israel', 'Non-Fiction History'),
+    ('AUTH003', 'Ruskin Bond', 88, 'India', 'Fiction');
+
+-- Publications
+INSERT INTO dim_publication (publication_id, publication_name, country, founding_year)
+VALUES 
+    ('PUB001', 'Penguin India', 'India', 1987),
+    ('PUB002', 'Harper Collins', 'USA', 1989),
+    ('PUB003', 'Oxford University Press', 'UK', 1896);
+
+-- Date Dimension
+INSERT INTO dim_date (full_date, year, quarter, month, month_name, day_of_month, day_of_week)
+VALUES 
+    ('2023-07-15', 2023, 'Q3', 7, 'July', 15, 'Saturday'),
+    ('2023-08-20', 2023, 'Q3', 8, 'August', 20, 'Sunday');
+
+-- Fact Book Sales
+INSERT INTO fact_book_sales (
+    book_id, 
+    book_type_key, 
+    location_key, 
+    author_key, 
+    publication_key, 
+    date_key,
+    book_title,
+    quantity_in_stock, 
+    cost_price, 
+    selling_price, 
+    total_profit
+)
+VALUES 
+    (
+        'BOOK001', 
+        (SELECT book_type_key FROM dim_book_type WHERE book_type_id = 'BT001'),
+        (SELECT location_key FROM dim_location WHERE location_id = 'LOC001'),
+        (SELECT author_key FROM dim_author WHERE author_id = 'AUTH001'),
+        (SELECT publication_key FROM dim_publication WHERE publication_id = 'PUB001'),
+        (SELECT date_key FROM dim_date WHERE full_date = '2023-07-15'),
+        'Half Girlfriend',
+        50, 
+        200.00, 
+        250.00, 
+        2500.00
+    ),
+    (
+        'BOOK002', 
+        (SELECT book_type_key FROM dim_book_type WHERE book_type_id = 'BT002'),
+        (SELECT location_key FROM dim_location WHERE location_id = 'LOC002'),
+        (SELECT author_key FROM dim_author WHERE author_id = 'AUTH002'),
+        (SELECT publication_key FROM dim_publication WHERE publication_id = 'PUB002'),
+        (SELECT date_key FROM dim_date WHERE full_date = '2023-08-20'),
+        'Sapiens',
+        30, 
+        500.00, 
+        650.00, 
+        4500.00
+    );
+
+-- Analytical Queries
+
+-- 1. Quantity and Profit per Book Type
+SELECT 
+    bt.book_type_name,
+    bt.category,
+    SUM(fs.quantity_in_stock) AS total_quantity,
+    SUM(fs.total_profit) AS total_profit
+FROM 
+    fact_book_sales fs
+JOIN 
+    dim_book_type bt ON fs.book_type_key = bt.book_type_key
+GROUP BY 
+    bt.book_type_name, bt.category
+ORDER BY 
+    total_profit DESC;
+
+-- 2. Quantity and Profit per Location
+SELECT 
+    l.library_branch,
+    l.city,
+    l.country,
+    SUM(fs.quantity_in_stock) AS total_quantity,
+    SUM(fs.total_profit) AS total_profit
+FROM 
+    fact_book_sales fs
+JOIN 
+    dim_location l ON fs.location_key = l.location_key
+GROUP BY 
+    l.library_branch, l.city, l.country
+ORDER BY 
+    total_profit DESC;
+
+-- 3. Quantity and Profit per Author
+SELECT 
+    a.author_name,
+    a.country,
+    a.genre,
+    SUM(fs.quantity_in_stock) AS total_quantity,
+    SUM(fs.total_profit) AS total_profit
+FROM 
+    fact_book_sales fs
+JOIN 
+    dim_author a ON fs.author_key = a.author_key
+GROUP BY 
+    a.author_name, a.country, a.genre
+ORDER BY 
+    total_profit DESC;
+
+-- 4. Quantity and Profit per Publication
+SELECT 
+    p.publication_name,
+    p.country,
+    p.founding_year,
+    SUM(fs.quantity_in_stock) AS total_quantity,
+    SUM(fs.total_profit) AS total_profit
+FROM 
+    fact_book_sales fs
+JOIN 
+    dim_publication p ON fs.publication_key = p.publication_key
+GROUP BY 
+    p.publication_name, p.country, p.founding_year
+ORDER BY 
+    total_profit DESC;
+
+-- 5. Detailed Book Analysis
+SELECT 
+    fs.book_title,
+    bt.book_type_name,
+    a.author_name,
+    p.publication_name,
+    l.library_branch,
+    fs.quantity_in_stock,
+    fs.cost_price,
+    fs.selling_price,
+    fs.total_profit
+FROM 
+    fact_book_sales fs
+JOIN 
+    dim_book_type bt ON fs.book_type_key = bt.book_type_key
+JOIN 
+    dim_author a ON fs.author_key = a.author_key
+JOIN 
+    dim_publication p ON fs.publication_key = p.publication_key
+JOIN 
+    dim_location l ON fs.location_key = l.location_key
+ORDER BY 
+    fs.total_profit DESC;
+    
+    
+    
+    
+3------------
+
+
+-- Star Schema for Banking Enterprise
+
+-- Dimension Tables
+CREATE TABLE dim_customer (
+    customer_key SERIAL PRIMARY KEY,
+    customer_id VARCHAR(50) UNIQUE NOT NULL,
+    full_name VARCHAR(255),
+    age INTEGER,
+    gender VARCHAR(10),
+    income_bracket VARCHAR(50),
+    education_level VARCHAR(100),
+    marital_status VARCHAR(20)
+);
+
+CREATE TABLE dim_account (
+    account_key SERIAL PRIMARY KEY,
+    account_id VARCHAR(50) UNIQUE NOT NULL,
+    account_type VARCHAR(50),
+    account_status VARCHAR(50),
+    opening_branch VARCHAR(100),
+    interest_rate DECIMAL(5,2)
+);
+
+CREATE TABLE dim_branch (
+    branch_key SERIAL PRIMARY KEY,
+    branch_id VARCHAR(50) UNIQUE NOT NULL,
+    branch_name VARCHAR(100),
+    location VARCHAR(100),
+    region VARCHAR(50),
+    establishment_date DATE
+);
+
+CREATE TABLE dim_time (
+    time_key SERIAL PRIMARY KEY,
+    full_date DATE,
+    year INTEGER,
+    quarter VARCHAR(2),
+    month INTEGER,
+    day_of_month INTEGER,
+    day_of_week VARCHAR(20)
+);
+
+CREATE TABLE dim_product (
+    product_key SERIAL PRIMARY KEY,
+    product_id VARCHAR(50) UNIQUE NOT NULL,
+    product_name VARCHAR(100),
+    product_type VARCHAR(50),
+    commission_rate DECIMAL(5,2)
+);
+
+-- Fact Table
+CREATE TABLE fact_banking_transaction (
+    transaction_key SERIAL PRIMARY KEY,
+    customer_key INTEGER REFERENCES dim_customer(customer_key),
+    account_key INTEGER REFERENCES dim_account(account_key),
+    branch_key INTEGER REFERENCES dim_branch(branch_key),
+    time_key INTEGER REFERENCES dim_time(time_key),
+    product_key INTEGER REFERENCES dim_product(product_key),
+    
+    transaction_amount DECIMAL(12,2),
+    transaction_type VARCHAR(50),
+    balance_after_transaction DECIMAL(12,2),
+    
+    profit_amount DECIMAL(12,2),
+    cost_amount DECIMAL(12,2)
+);
+
+-- Sample Data Insertion
+-- Customer Dimension
+INSERT INTO dim_customer (customer_id, full_name, age, gender, income_bracket, education_level, marital_status)
+VALUES 
+    ('CUST001', 'John Doe', 35, 'Male', '75K-100K', 'Bachelor', 'Married'),
+    ('CUST002', 'Jane Smith', 42, 'Female', '100K-150K', 'Master', 'Single');
+
+-- Account Dimension
+INSERT INTO dim_account (account_id, account_type, account_status, opening_branch, interest_rate)
+VALUES 
+    ('ACC001', 'Savings', 'Active', 'Main Branch', 3.5),
+    ('ACC002', 'Checking', 'Active', 'Downtown Branch', 0.5);
+
+-- Branch Dimension
+INSERT INTO dim_branch (branch_id, branch_name, location, region, establishment_date)
+VALUES 
+    ('BR001', 'Main Branch', 'City Center', 'Metropolitan', '2000-01-01'),
+    ('BR002', 'Downtown Branch', 'Business District', 'Metropolitan', '2005-05-15');
+
+-- Time Dimension
+INSERT INTO dim_time (full_date, year, quarter, month, day_of_month, day_of_week)
+VALUES 
+    ('2023-07-15', 2023, 'Q3', 7, 15, 'Saturday'),
+    ('2023-08-20', 2023, 'Q3', 8, 20, 'Sunday');
+
+-- Product Dimension
+INSERT INTO dim_product (product_id, product_name, product_type, commission_rate)
+VALUES 
+    ('PROD001', 'Personal Loan', 'Loan', 2.5),
+    ('PROD002', 'Fixed Deposit', 'Investment', 1.5);
+
+-- Fact Transaction
+INSERT INTO fact_banking_transaction (
+    customer_key, account_key, branch_key, time_key, product_key,
+    transaction_amount, transaction_type, balance_after_transaction,
+    profit_amount, cost_amount
+)
+VALUES 
+    (
+        (SELECT customer_key FROM dim_customer WHERE customer_id = 'CUST001'),
+        (SELECT account_key FROM dim_account WHERE account_id = 'ACC001'),
+        (SELECT branch_key FROM dim_branch WHERE branch_id = 'BR001'),
+        (SELECT time_key FROM dim_time WHERE full_date = '2023-07-15'),
+        (SELECT product_key FROM dim_product WHERE product_id = 'PROD001'),
+        5000.00, 'Deposit', 25000.00, 
+        125.00, 50.00
+    ),
+    (
+        (SELECT customer_key FROM dim_customer WHERE customer_id = 'CUST002'),
+        (SELECT account_key FROM dim_account WHERE account_id = 'ACC002'),
+        (SELECT branch_key FROM dim_branch WHERE branch_id = 'BR002'),
+        (SELECT time_key FROM dim_time WHERE full_date = '2023-08-20'),
+        (SELECT product_key FROM dim_product WHERE product_id = 'PROD002'),
+        10000.00, 'Investment', 50000.00,
+        250.00, 100.00
+    );
+
+-- Analytical Queries for Star Schema
+
+-- 1. Total Transaction Profit by Customer Segment
+SELECT 
+    c.income_bracket, 
+    c.education_level,
+    SUM(f.profit_amount) AS total_profit,
+    SUM(f.transaction_amount) AS total_transaction_volume
+FROM 
+    fact_banking_transaction f
+JOIN 
+    dim_customer c ON f.customer_key = c.customer_key
+GROUP BY 
+    c.income_bracket, c.education_level
+ORDER BY 
+    total_profit DESC;
+
+-- 2. Branch Performance Analysis
+SELECT 
+    b.branch_name, 
+    b.region,
+    SUM(f.transaction_amount) AS total_transactions,
+    SUM(f.profit_amount) AS total_profit,
+    AVG(f.transaction_amount) AS avg_transaction_size
+FROM 
+    fact_banking_transaction f
+JOIN 
+    dim_branch b ON f.branch_key = b.branch_key
+GROUP BY 
+    b.branch_name, b.region
+ORDER BY 
+    total_profit DESC;
+
+-- 3. Product Profitability Analysis
+SELECT 
+    p.product_name, 
+    p.product_type,
+    COUNT(*) AS transaction_count,
+    SUM(f.transaction_amount) AS total_transaction_amount,
+    SUM(f.profit_amount) AS total_profit,
+    AVG(p.commission_rate) AS avg_commission_rate
+FROM 
+    fact_banking_transaction f
+JOIN 
+    dim_product p ON f.product_key = p.product_key
+GROUP BY 
+    p.product_name, p.product_type
+ORDER BY 
+    total_profit DESC;
+    
+    
+    
+    
+    
+    -- Snowflake Schema for Banking Enterprise
+
+-- Detailed Dimension Tables
+CREATE TABLE dim_customer_category (
+    category_key SERIAL PRIMARY KEY,
+    income_bracket VARCHAR(50),
+    education_level VARCHAR(100)
+);
+
+CREATE TABLE dim_customer (
+    customer_key SERIAL PRIMARY KEY,
+    customer_id VARCHAR(50) UNIQUE NOT NULL,
+    full_name VARCHAR(255),
+    age INTEGER,
+    gender VARCHAR(10),
+    category_key INTEGER REFERENCES dim_customer_category(category_key),
+    marital_status VARCHAR(20)
+);
+
+CREATE TABLE dim_account_type (
+    account_type_key SERIAL PRIMARY KEY,
+    account_type VARCHAR(50),
+    description TEXT,
+    minimum_balance DECIMAL(10,2)
+);
+
+CREATE TABLE dim_account (
+    account_key SERIAL PRIMARY KEY,
+    account_id VARCHAR(50) UNIQUE NOT NULL,
+    account_type_key INTEGER REFERENCES dim_account_type(account_type_key),
+    account_status VARCHAR(50),
+    interest_rate DECIMAL(5,2)
+);
+
+CREATE TABLE dim_branch_region (
+    region_key SERIAL PRIMARY KEY,
+    region_name VARCHAR(50),
+    region_manager VARCHAR(100)
+);
+
+CREATE TABLE dim_branch (
+    branch_key SERIAL PRIMARY KEY,
+    branch_id VARCHAR(50) UNIQUE NOT NULL,
+    branch_name VARCHAR(100),
+    region_key INTEGER REFERENCES dim_branch_region(region_key),
+    establishment_date DATE
+);
+
+CREATE TABLE dim_time (
+    time_key SERIAL PRIMARY PRIMARY KEY,
+    full_date DATE,
+    year INTEGER,
+    quarter VARCHAR(2),
+    month INTEGER,
+    day_of_month INTEGER,
+    day_of_week VARCHAR(20)
+);
+
+CREATE TABLE dim_product_category (
+    category_key SERIAL PRIMARY KEY,
+    category_name VARCHAR(50),
+    risk_level VARCHAR(20)
+);
+
+CREATE TABLE dim_product (
+    product_key SERIAL PRIMARY KEY,
+    product_id VARCHAR(50) UNIQUE NOT NULL,
+    product_name VARCHAR(100),
+    category_key INTEGER REFERENCES dim_product_category(category_key),
+    commission_rate DECIMAL(5,2)
+);
+
+-- Fact Table
+CREATE TABLE fact_banking_transaction (
+    transaction_key SERIAL PRIMARY KEY,
+    customer_key INTEGER REFERENCES dim_customer(customer_key),
+    account_key INTEGER REFERENCES dim_account(account_key),
+    branch_key INTEGER REFERENCES dim_branch(branch_key),
+    time_key INTEGER REFERENCES dim_time(time_key),
+    product_key INTEGER REFERENCES dim_product(product_key),
+    
+    transaction_amount DECIMAL(12,2),
+    transaction_type VARCHAR(50),
+    balance_after_transaction DECIMAL(12,2),
+    
+    profit_amount DECIMAL(12,2),
+    cost_amount DECIMAL(12,2)
+);
+
+-- Sample Data Insertion (Similar to Star Schema, but with more granular insertions)
+-- Detailed insertions into new dimension tables...
+
+-- Analytical Queries for Snowflake Schema
+
+-- 1. Detailed Customer Segment Profitability
+SELECT 
+    cc.income_bracket, 
+    cc.education_level,
+    SUM(f.profit_amount) AS total_profit,
+    SUM(f.transaction_amount) AS total_transaction_volume
+FROM 
+    fact_banking_transaction f
+JOIN 
+    dim_customer c ON f.customer_key = c.customer_key
+JOIN 
+    dim_customer_category cc ON c.category_key = cc.category_key
+GROUP BY 
+    cc.income_bracket, cc.education_level
+ORDER BY 
+    total_profit DESC;
+
+-- 2. Region and Branch Performance with Hierarchical Analysis
+SELECT 
+    r.region_name,
+    b.branch_name, 
+    SUM(f.transaction_amount) AS total_transactions,
+    SUM(f.profit_amount) AS total_profit,
+    AVG(f.transaction_amount) AS avg_transaction_size
+FROM 
+    fact_banking_transaction f
+JOIN 
+    dim_branch b ON f.branch_key = b.branch_key
+JOIN 
+    dim_branch_region r ON b.region_key = r.region_key
+GROUP BY 
+    r.region_name, b.branch_name
+ORDER BY 
+    total_profit DESC;
+
+-- 3. Product Profitability with Risk Category
+SELECT 
+    pc.category_name,
+    pc.risk_level,
+    p.product_name, 
+    COUNT(*) AS transaction_count,
+    SUM(f.transaction_amount) AS total_transaction_amount,
+    SUM(f.profit_amount) AS total_profit
+FROM 
+    fact_banking_transaction f
+JOIN 
+    dim_product p ON f.product_key = p.product_key
+JOIN 
+    dim_product_category pc ON p.category_key = pc.category_key
+GROUP BY 
+    pc.category_name, pc.risk_level, p.product_name
+ORDER BY 
+    total_profit DESC;
+    
+    
+    -- Galaxy Schema for Banking Enterprise
+
+-- Customer Dimension Hierarchy
+CREATE TABLE dim_customer_demographic (
+    demographic_key SERIAL PRIMARY KEY,
+    age_group VARCHAR(20),
+    gender VARCHAR(10),
+    marital_status VARCHAR(20)
+);
+
+CREATE TABLE dim_customer_economic (
+    economic_key SERIAL PRIMARY KEY,
+    income_bracket VARCHAR(50),
+    education_level VARCHAR(100),
+    occupation VARCHAR(100)
+);
+
+CREATE TABLE dim_customer (
+    customer_key SERIAL PRIMARY KEY,
+    customer_id VARCHAR(50) UNIQUE NOT NULL,
+    full_name VARCHAR(255),
+    demographic_key INTEGER REFERENCES dim_customer_demographic(demographic_key),
+    economic_key INTEGER REFERENCES dim_customer_economic(economic_key)
+);
+
+-- Product Dimension Hierarchy
+CREATE TABLE dim_product_financial (
+    financial_key SERIAL PRIMARY KEY,
+    product_type VARCHAR(50),
+    risk_level VARCHAR(20),
+    expected_return DECIMAL(5,2)
+);
+
+CREATE TABLE dim_product_marketing (
+    marketing_key SERIAL PRIMARY KEY,
+    target_segment VARCHAR(50),
+    marketing_channel VARCHAR(50),
+    commission_rate DECIMAL(5,2)
+);
+
+CREATE TABLE dim_product (
+    product_key SERIAL PRIMARY KEY,
+    product_id VARCHAR(50) UNIQUE NOT NULL,
+    product_name VARCHAR(100),
+    financial_key INTEGER REFERENCES dim_product_financial(financial_key),
+    marketing_key INTEGER REFERENCES dim_product_marketing(marketing_key)
+);
+
+-- Branch Dimension Hierarchy
+CREATE TABLE dim_branch_geographic (
+    geographic_key SERIAL PRIMARY KEY,
+    region VARCHAR(50),
+    country VARCHAR(50),
+    urban_rural_classification VARCHAR(20)
+);
+
+CREATE TABLE dim_branch_operational (
+    operational_key SERIAL PRIMARY KEY,
+    branch_size VARCHAR(20),
+    staffing_level INTEGER,
+    technology_tier VARCHAR(20)
+);
+
+CREATE TABLE dim_branch (
+    branch_key SERIAL PRIMARY KEY,
+    branch_id VARCHAR(50) UNIQUE NOT NULL,
+    branch_name VARCHAR(100),
+    geographic_key INTEGER REFERENCES dim_branch_geographic(geographic_key),
+    operational_key INTEGER REFERENCES dim_branch_operational(operational_key)
+);
+
+-- Time Dimension
+CREATE TABLE dim_time (
+    time_key SERIAL PRIMARY KEY,
+    full_date DATE,
+    year INTEGER,
+    quarter VARCHAR(2),
+    month INTEGER,
+    day_of_week VARCHAR(20)
+);
+
+-- Transaction Fact Tables
+CREATE TABLE fact_banking_transaction (
+    transaction_key SERIAL PRIMARY KEY,
+    customer_key INTEGER REFERENCES dim_customer(customer_key),
+    product_key INTEGER REFERENCES dim_product(product_key),
+    branch_key INTEGER REFERENCES dim_branch(branch_key),
+    time_key INTEGER REFERENCES dim_time(time_key),
+    transaction_amount DECIMAL(12,2),
+    transaction_type VARCHAR(50),
+    profit_amount DECIMAL(12,2)
+);
+
+CREATE TABLE fact_customer_performance (
+    performance_key SERIAL PRIMARY KEY,
+    customer_key INTEGER REFERENCES dim_customer(customer_key),
+    total_transactions DECIMAL(12,2),
+    total_profit DECIMAL(12,2),
+    risk_score INTEGER
+);
+
+-- Sample Data Insertion
+-- Insert data into demographic dimension
+INSERT INTO dim_customer_demographic (age_group, gender, marital_status)
+VALUES 
+    ('35-45', 'Male', 'Married'),
+    ('25-35', 'Female', 'Single');
+
+-- Insert data into economic dimension
+INSERT INTO dim_customer_economic (income_bracket, education_level, occupation)
+VALUES 
+    ('50000-100000', 'Bachelors', 'Software Engineer'),
+    ('100000-150000', 'Masters', 'Data Scientist');
+
+-- Insert data into customer dimension
+INSERT INTO dim_customer (customer_id, full_name, demographic_key, economic_key)
+VALUES 
+    ('CUST001', 'John Doe', 1, 1),
+    ('CUST002', 'Jane Smith', 2, 2);
+
+-- Insert data into financial product dimension
+INSERT INTO dim_product_financial (product_type, risk_level, expected_return)
+VALUES 
+    ('Savings Account', 'Low', 1.50),
+    ('Mutual Fund', 'High', 8.25);
+
+-- Insert data into marketing product dimension
+INSERT INTO dim_product_marketing (target_segment, marketing_channel, commission_rate)
+VALUES 
+    ('Millennials', 'Online', 0.50),
+    ('High Net Worth', 'Direct', 1.00);
+
+-- Insert data into product dimension
+INSERT INTO dim_product (product_id, product_name, financial_key, marketing_key)
+VALUES 
+    ('PROD001', 'Savings Plus', 1, 1),
+    ('PROD002', 'Growth Fund', 2, 2);
+
+-- Insert data into branch geographic dimension
+INSERT INTO dim_branch_geographic (region, country, urban_rural_classification)
+VALUES 
+    ('North America', 'USA', 'Urban'),
+    ('Asia', 'India', 'Rural');
+
+-- Insert data into branch operational dimension
+INSERT INTO dim_branch_operational (branch_size, staffing_level, technology_tier)
+VALUES 
+    ('Large', 50, 'High'),
+    ('Medium', 25, 'Medium');
+
+-- Insert data into branch dimension
+INSERT INTO dim_branch (branch_id, branch_name, geographic_key, operational_key)
+VALUES 
+    ('BR001', 'New York Branch', 1, 1),
+    ('BR002', 'Delhi Branch', 2, 2);
+
+-- Insert data into time dimension
+INSERT INTO dim_time (full_date, year, quarter, month, day_of_week)
+VALUES 
+    ('2024-01-15', 2024, 'Q1', 1, 'Monday'),
+    ('2024-02-20', 2024, 'Q1', 2, 'Tuesday');
+
+-- Insert data into fact banking transaction table
+INSERT INTO fact_banking_transaction (customer_key, product_key, branch_key, time_key, transaction_amount, transaction_type, profit_amount)
+VALUES 
+    (1, 1, 1, 1, 1000.00, 'Deposit', 15.00),
+    (2, 2, 2, 2, 2000.00, 'Investment', 165.00);
+
+-- Insert data into fact customer performance table
+INSERT INTO fact_customer_performance (customer_key, total_transactions, total_profit, risk_score)
+VALUES 
+    (1, 5000.00, 150.00, 10),
+    (2, 8000.00, 650.00, 25);
+
+-- Analytics Queries
+-- 1. Total transactions by branch
+SELECT b.branch_name, SUM(f.transaction_amount) AS total_transactions
+FROM fact_banking_transaction f
+JOIN dim_branch b ON f.branch_key = b.branch_key
+GROUP BY b.branch_name;
+
+-- 2. Average profit by product type
+SELECT p.product_name, AVG(f.profit_amount) AS average_profit
+FROM fact_banking_transaction f
+JOIN dim_product p ON f.product_key = p.product_key
+GROUP BY p.product_name;
+
+-- 3. Total profit generated by each customer
+SELECT c.full_name, SUM(f.profit_amount) AS total_profit
+FROM fact_banking_transaction f
+JOIN dim_customer c ON f.customer_key = c.customer_key
+GROUP BY c.full_name;
+
+-- 4. Risk score analysis for high-value customers
+SELECT c.full_name, p.risk_score
+FROM fact_customer_performance p
+JOIN dim_customer c ON p.customer_key = c.customer_key
+WHERE p.total_transactions > 7000;
+
+-- 5. Transactions breakdown by product and region
+SELECT p.product_name, g.region, SUM(f.transaction_amount) AS total_transactions
+FROM fact_banking_transaction f
+JOIN dim_product p ON f.product_key = p.product_key
+JOIN dim_branch b ON f.branch_key = b.branch_key
+JOIN dim_branch_geographic g ON b.geographic_key = g.geographic_key
+GROUP BY p.product_name, g.region;
+
+
+-- Star Schema for Healthcare Enterprise
+
+-- Dimension Tables
+CREATE TABLE dim_patient (
+    patient_key SERIAL PRIMARY KEY,
+    patient_id VARCHAR(50) UNIQUE NOT NULL,
+    full_name VARCHAR(255),
+    age INTEGER,
+    gender VARCHAR(10),
+    insurance_type VARCHAR(50),
+    marital_status VARCHAR(20),
+    chronic_condition VARCHAR(100)
+);
+
+CREATE TABLE dim_doctor (
+    doctor_key SERIAL PRIMARY KEY,
+    doctor_id VARCHAR(50) UNIQUE NOT NULL,
+    full_name VARCHAR(255),
+    specialization VARCHAR(100),
+    department VARCHAR(100),
+    years_of_experience INTEGER
+);
+
+CREATE TABLE dim_hospital (
+    hospital_key SERIAL PRIMARY KEY,
+    hospital_id VARCHAR(50) UNIQUE NOT NULL,
+    hospital_name VARCHAR(255),
+    location VARCHAR(100),
+    hospital_type VARCHAR(50),
+    bed_capacity INTEGER
+);
+
+CREATE TABLE dim_treatment (
+    treatment_key SERIAL PRIMARY KEY,
+    treatment_id VARCHAR(50) UNIQUE NOT NULL,
+    treatment_name VARCHAR(255),
+    treatment_category VARCHAR(100),
+    complexity_level VARCHAR(50)
+);
+
+CREATE TABLE dim_time (
+    time_key SERIAL PRIMARY KEY,
+    full_date DATE,
+    year INTEGER,
+    quarter VARCHAR(2),
+    month INTEGER,
+    day_of_month INTEGER,
+    day_of_week VARCHAR(20)
+);
+
+-- Fact Table
+CREATE TABLE fact_medical_service (
+    service_key SERIAL PRIMARY KEY,
+    patient_key INTEGER REFERENCES dim_patient(patient_key),
+    doctor_key INTEGER REFERENCES dim_doctor(doctor_key),
+    hospital_key INTEGER REFERENCES dim_hospital(hospital_key),
+    treatment_key INTEGER REFERENCES dim_treatment(treatment_key),
+    admission_time_key INTEGER REFERENCES dim_time(time_key),
+    discharge_time_key INTEGER REFERENCES dim_time(time_key),
+    
+    admission_type VARCHAR(50),
+    length_of_stay INTEGER,
+    total_cost DECIMAL(12,2),
+    treatment_cost DECIMAL(12,2),
+    hospital_revenue DECIMAL(12,2),
+    
+    is_emergency BOOLEAN,
+    patient_outcome VARCHAR(50)
+);
+
+-- Sample Data Insertion
+-- Patient Dimension
+INSERT INTO dim_patient (patient_id, full_name, age, gender, insurance_type, marital_status, chronic_condition)
+VALUES 
+    ('PAT001', 'John Doe', 45, 'Male', 'Premium', 'Married', 'Diabetes'),
+    ('PAT002', 'Jane Smith', 35, 'Female', 'Standard', 'Single', 'Hypertension');
+
+-- Doctor Dimension
+INSERT INTO dim_doctor (doctor_id, full_name, specialization, department, years_of_experience)
+VALUES 
+    ('DOC001', 'Dr. Emily Chen', 'Cardiology', 'Heart Center', 15),
+    ('DOC002', 'Dr. Michael Rodriguez', 'Oncology', 'Cancer Institute', 20);
+
+-- Hospital Dimension
+INSERT INTO dim_hospital (hospital_id, hospital_name, location, hospital_type, bed_capacity)
+VALUES 
+    ('HOSP001', 'City Memorial Hospital', 'Downtown', 'General', 500),
+    ('HOSP002', 'Riverside Medical Center', 'Suburban', 'Specialized', 250);
+
+-- Treatment Dimension
+INSERT INTO dim_treatment (treatment_id, treatment_name, treatment_category, complexity_level)
+VALUES 
+    ('TREAT001', 'Cardiac Bypass Surgery', 'Cardiovascular', 'High'),
+    ('TREAT002', 'Chemotherapy', 'Oncology', 'Very High');
+
+-- Time Dimension
+INSERT INTO dim_time (full_date, year, quarter, month, day_of_month, day_of_week)
+VALUES 
+    ('2023-07-15', 2023, 'Q3', 7, 15, 'Saturday'),
+    ('2023-08-20', 2023, 'Q3', 8, 20, 'Sunday');
+
+-- Fact Medical Service
+INSERT INTO fact_medical_service (
+    patient_key, doctor_key, hospital_key, treatment_key, 
+    admission_time_key, discharge_time_key,
+    admission_type, length_of_stay, 
+    total_cost, treatment_cost, hospital_revenue,
+    is_emergency, patient_outcome
+)
+VALUES 
+    (
+        (SELECT patient_key FROM dim_patient WHERE patient_id = 'PAT001'),
+        (SELECT doctor_key FROM dim_doctor WHERE doctor_id = 'DOC001'),
+        (SELECT hospital_key FROM dim_hospital WHERE hospital_id = 'HOSP001'),
+        (SELECT treatment_key FROM dim_treatment WHERE treatment_id = 'TREAT001'),
+        (SELECT time_key FROM dim_time WHERE full_date = '2023-07-15'),
+        (SELECT time_key FROM dim_time WHERE full_date = '2023-08-20'),
+        'Planned', 5, 
+        50000.00, 35000.00, 15000.00,
+        FALSE, 'Successful'
+    ),
+    (
+        (SELECT patient_key FROM dim_patient WHERE patient_id = 'PAT002'),
+        (SELECT doctor_key FROM dim_doctor WHERE doctor_id = 'DOC002'),
+        (SELECT hospital_key FROM dim_hospital WHERE hospital_id = 'HOSP002'),
+        (SELECT treatment_key FROM dim_treatment WHERE treatment_id = 'TREAT002'),
+        (SELECT time_key FROM dim_time WHERE full_date = '2023-07-15'),
+        (SELECT time_key FROM dim_time WHERE full_date = '2023-08-20'),
+        'Emergency', 7, 
+        75000.00, 55000.00, 20000.00,
+        TRUE, 'In Progress'
+    );
+
+-- Analytical Queries for Star Schema
+
+-- 1. Hospital Performance Analysis
+SELECT 
+    h.hospital_name,
+    h.hospital_type,
+    COUNT(*) AS total_treatments,
+    SUM(f.hospital_revenue) AS total_revenue,
+    AVG(f.length_of_stay) AS avg_length_of_stay
+FROM 
+    fact_medical_service f
+JOIN 
+    dim_hospital h ON f.hospital_key = h.hospital_key
+GROUP BY 
+    h.hospital_name, h.hospital_type
+ORDER BY 
+    total_revenue DESC;
+
+-- 2. Doctor Performance and Specialization Impact
+SELECT 
+    d.full_name,
+    d.specialization,
+    COUNT(*) AS total_treatments,
+    SUM(f.treatment_cost) AS total_treatment_cost,
+    AVG(f.length_of_stay) AS avg_patient_stay
+FROM 
+    fact_medical_service f
+JOIN 
+    dim_doctor d ON f.doctor_key = d.doctor_key
+GROUP BY 
+    d.full_name, d.specialization
+ORDER BY 
+    total_treatments DESC;
+
+-- 3. Patient Demographic and Treatment Analysis
+SELECT 
+    p.insurance_type,
+    p.chronic_condition,
+    t.treatment_category,
+    COUNT(*) AS treatment_count,
+    AVG(f.total_cost) AS avg_treatment_cost
+FROM 
+    fact_medical_service f
+JOIN 
+    dim_patient p ON f.patient_key = p.patient_key
+JOIN 
+    dim_treatment t ON f.treatment_key = t.treatment_key
+GROUP BY 
+    p.insurance_type, p.chronic_condition, t.treatment_category
+ORDER BY 
+    treatment_count DESC;
+    
+    
+    
+    
+    
+    
+    -- Snowflake Schema for Healthcare Enterprise
+
+-- Patient Dimension Hierarchy
+CREATE TABLE dim_patient_demographic (
+    demographic_key SERIAL PRIMARY KEY,
+    age_group VARCHAR(20),
+    gender VARCHAR(10),
+    marital_status VARCHAR(20)
+);
+
+CREATE TABLE dim_patient_health (
+    health_key SERIAL PRIMARY KEY,
+    insurance_type VARCHAR(50),
+    chronic_condition VARCHAR(100),
+    risk_category VARCHAR(20)
+);
+
+CREATE TABLE dim_patient (
+    patient_key SERIAL PRIMARY KEY,
+    patient_id VARCHAR(50) UNIQUE NOT NULL,
+    full_name VARCHAR(255),
+    demographic_key INTEGER REFERENCES dim_patient_demographic(demographic_key),
+    health_key INTEGER REFERENCES dim_patient_health(health_key)
+);
+
+-- Doctor Dimension Hierarchy
+CREATE TABLE dim_doctor_professional (
+    professional_key SERIAL PRIMARY KEY,
+    specialization VARCHAR(100),
+    department VARCHAR(100),
+    qualification VARCHAR(100)
+);
+
+CREATE TABLE dim_doctor_performance (
+    performance_key SERIAL PRIMARY KEY,
+    years_of_experience INTEGER,
+    success_rate DECIMAL(5,2),
+    research_publications INTEGER
+);
+
+CREATE TABLE dim_doctor (
+    doctor_key SERIAL PRIMARY KEY,
+    doctor_id VARCHAR(50) UNIQUE NOT NULL,
+    full_name VARCHAR(255),
+    professional_key INTEGER REFERENCES dim_doctor_professional(professional_key),
+    performance_key INTEGER REFERENCES dim_doctor_performance(performance_key)
+);
+
+-- Hospital Dimension Hierarchy
+CREATE TABLE dim_hospital_location (
+    location_key SERIAL PRIMARY KEY,
+    city VARCHAR(100),
+    state VARCHAR(100),
+    region VARCHAR(50)
+);
+
+CREATE TABLE dim_hospital_operational (
+    operational_key SERIAL PRIMARY KEY,
+    hospital_type VARCHAR(50),
+    bed_capacity INTEGER,
+    accreditation_level VARCHAR(50)
+);
+
+CREATE TABLE dim_hospital (
+    hospital_key SERIAL PRIMARY KEY,
+    hospital_id VARCHAR(50) UNIQUE NOT NULL,
+    hospital_name VARCHAR(255),
+    location_key INTEGER REFERENCES dim_hospital_location(location_key),
+    operational_key INTEGER REFERENCES dim_hospital_operational(operational_key)
+);
+
+-- Treatment Dimension Hierarchy
+CREATE TABLE dim_treatment_category (
+    category_key SERIAL PRIMARY KEY,
+    treatment_category VARCHAR(100),
+    medical_field VARCHAR(100)
+);
+
+CREATE TABLE dim_treatment_complexity (
+    complexity_key SERIAL PRIMARY KEY,
+    complexity_level VARCHAR(50),
+    risk_rating INTEGER,
+    average_duration INTEGER
+);
+
+CREATE TABLE dim_treatment (
+    treatment_key SERIAL PRIMARY KEY,
+    treatment_id VARCHAR(50) UNIQUE NOT NULL,
+    treatment_name VARCHAR(255),
+    category_key INTEGER REFERENCES dim_treatment_category(category_key),
+    complexity_key INTEGER REFERENCES dim_treatment_complexity(complexity_key)
+);
+
+-- Time Dimension
+CREATE TABLE dim_time (
+    time_key SERIAL PRIMARY KEY,
+    full_date DATE,
+    year INTEGER,
+    quarter VARCHAR(2),
+    month INTEGER,
+    day_of_month INTEGER,
+    day_of_week VARCHAR(20)
+);
+
+-- Fact Table
+CREATE TABLE fact_medical_service (
+    service_key SERIAL PRIMARY KEY,
+    patient_key INTEGER REFERENCES dim_patient(patient_key),
+    doctor_key INTEGER REFERENCES dim_doctor(doctor_key),
+    hospital_key INTEGER REFERENCES dim_hospital(hospital_key),
+    treatment_key INTEGER REFERENCES dim_treatment(treatment_key),
+    admission_time_key INTEGER REFERENCES dim_time(time_key),
+    discharge_time_key INTEGER REFERENCES dim_time(time_key),
+    
+    admission_type VARCHAR(50),
+    length_of_stay INTEGER,
+    total_cost DECIMAL(12,2),
+    treatment_cost DECIMAL(12,2),
+    hospital_revenue DECIMAL(12,2),
+    
+    is_emergency BOOLEAN,
+    patient_outcome VARCHAR(50)
+);
+
+-- Analytical Queries for Snowflake Schema
+
+-- 1. Detailed Hospital Performance Analysis
+SELECT 
+    hl.region,
+    ho.hospital_type,
+    h.hospital_name,
+    COUNT(*) AS total_treatments,
+    SUM(f.hospital_revenue) AS total_revenue,
+    AVG(f.length_of_stay) AS avg_length_of_stay
+FROM 
+    fact_medical_service f
+JOIN 
+    dim_hospital h ON f.hospital_key = h.hospital_key
+JOIN 
+    dim_hospital_location hl ON h.location_key = hl.location_key
+JOIN 
+    dim_hospital_operational ho ON h.operational_key = ho.operational_key
+GROUP BY 
+    hl.region, ho.hospital_type, h.hospital_name
+ORDER BY 
+    total_revenue DESC;
+
+-- 2. Comprehensive Doctor Performance Analysis
+SELECT 
+    dp.specialization,
+    dp.department,
+    dperf.years_of_experience,
+    dperf.success_rate,
+    d.full_name,
+    COUNT(*) AS total_treatments,
+    SUM(f.treatment_cost) AS total_treatment_cost
+FROM 
+    fact_medical_service f
+JOIN 
+    dim_doctor d ON f.doctor_key = d.doctor_key
+JOIN 
+    dim_doctor_professional dp ON d.professional_key = dp.professional_key
+JOIN 
+    dim_doctor_performance dperf ON d.performance_key = dperf.performance_key
+GROUP BY 
+    dp.specialization, dp.department, 
+    dperf.years_of_experience, dperf.success_rate,
+    d.full_name
+ORDER BY 
+    total_treatments DESC;
+
+-- 3. Detailed Patient Treatment Analysis
+SELECT 
+    pd.age_group,
+    pd.gender,
+    ph.insurance_type,
+    ph.chronic_condition,
+    tc.treatment_category,
+    tcomp.complexity_level,
+    COUNT(*) AS treatment_count,
+    AVG(f.total_cost) AS avg_treatment_cost
+FROM 
+    fact_medical_service f
+JOIN 
+    dim_patient p ON f.patient_key = p.patient_key
+JOIN 
+    dim_patient_demographic pd ON p.demographic_key = pd.demographic_key
+JOIN 
+    dim_patient_health ph ON p.health_key = ph.health_key
+JOIN 
+    dim_treatment t ON f.treatment_key = t.treatment_key
+JOIN 
+    dim_treatment_category tc ON t.category_key = tc.category_key
+JOIN 
+    dim_treatment_complexity tcomp ON t.complexity_key = tcomp.complexity_key
+GROUP BY 
+    pd.age_group, pd.gender, 
+    ph.insurance_type, ph.chronic_condition,
+    tc.treatment_category, tcomp.complexity_level
+ORDER BY 
+    treatment_count DESC;
+    
+    
+   -- Galaxy Schema for Banking Enterprise
+
+-- Customer Dimension Hierarchy
+CREATE TABLE dim_customer_demographic (
+    demographic_key SERIAL PRIMARY KEY,
+    age_group VARCHAR(20),
+    gender VARCHAR(10),
+    marital_status VARCHAR(20)
+);
+
+CREATE TABLE dim_customer_economic (
+    economic_key SERIAL PRIMARY KEY,
+    income_bracket VARCHAR(50),
+    education_level VARCHAR(100),
+    occupation VARCHAR(100)
+);
+
+CREATE TABLE dim_customer (
+    customer_key SERIAL PRIMARY KEY,
+    customer_id VARCHAR(50) UNIQUE NOT NULL,
+    full_name VARCHAR(255),
+    demographic_key INTEGER REFERENCES dim_customer_demographic(demographic_key),
+    economic_key INTEGER REFERENCES dim_customer_economic(economic_key)
+);
+
+-- Product Dimension Hierarchy
+CREATE TABLE dim_product_financial (
+    financial_key SERIAL PRIMARY KEY,
+    product_type VARCHAR(50),
+    risk_level VARCHAR(20),
+    expected_return DECIMAL(5,2)
+);
+
+CREATE TABLE dim_product_marketing (
+    marketing_key SERIAL PRIMARY KEY,
+    target_segment VARCHAR(50),
+    marketing_channel VARCHAR(50),
+    commission_rate DECIMAL(5,2)
+);
+
+CREATE TABLE dim_product (
+    product_key SERIAL PRIMARY KEY,
+    product_id VARCHAR(50) UNIQUE NOT NULL,
+    product_name VARCHAR(100),
+    financial_key INTEGER REFERENCES dim_product_financial(financial_key),
+    marketing_key INTEGER REFERENCES dim_product_marketing(marketing_key)
+);
+
+-- Branch Dimension Hierarchy
+CREATE TABLE dim_branch_geographic (
+    geographic_key SERIAL PRIMARY KEY,
+    region VARCHAR(50),
+    country VARCHAR(50),
+    urban_rural_classification VARCHAR(20)
+);
+
+CREATE TABLE dim_branch_operational (
+    operational_key SERIAL PRIMARY KEY,
+    branch_size VARCHAR(20),
+    staffing_level INTEGER,
+    technology_tier VARCHAR(20)
+);
+
+CREATE TABLE dim_branch (
+    branch_key SERIAL PRIMARY KEY,
+    branch_id VARCHAR(50) UNIQUE NOT NULL,
+    branch_name VARCHAR(100),
+    geographic_key INTEGER REFERENCES dim_branch_geographic(geographic_key),
+    operational_key INTEGER REFERENCES dim_branch_operational(operational_key)
+);
+
+-- Time Dimension
+CREATE TABLE dim_time (
+    time_key SERIAL PRIMARY KEY,
+    full_date DATE,
+    year INTEGER,
+    quarter VARCHAR(2),
+    month INTEGER,
+    day_of_week VARCHAR(20)
+);
+
+-- Transaction Fact Tables
+CREATE TABLE fact_banking_transaction (
+    transaction_key SERIAL PRIMARY KEY,
+    customer_key INTEGER REFERENCES dim_customer(customer_key),
+    product_key INTEGER REFERENCES dim_product(product_key),
+    branch_key INTEGER REFERENCES dim_branch(branch_key),
+    time_key INTEGER REFERENCES dim_time(time_key),
+    transaction_amount DECIMAL(12,2),
+    transaction_type VARCHAR(50),
+    profit_amount DECIMAL(12,2)
+);
+
+CREATE TABLE fact_customer_performance (
+    performance_key SERIAL PRIMARY KEY,
+    customer_key INTEGER REFERENCES dim_customer(customer_key),
+    total_transactions DECIMAL(12,2),
+    total_profit DECIMAL(12,2),
+    risk_score INTEGER
+);
+
+-- Sample Data Insertion
+-- Insert data into demographic dimension
+INSERT INTO dim_customer_demographic (age_group, gender, marital_status)
+VALUES 
+    ('35-45', 'Male', 'Married'),
+    ('25-35', 'Female', 'Single');
+
+-- Insert data into economic dimension
+INSERT INTO dim_customer_economic (income_bracket, education_level, occupation)
+VALUES 
+    ('50000-100000', 'Bachelors', 'Software Engineer'),
+    ('100000-150000', 'Masters', 'Data Scientist');
+
+-- Insert data into customer dimension
+INSERT INTO dim_customer (customer_id, full_name, demographic_key, economic_key)
+VALUES 
+    ('CUST001', 'John Doe', 1, 1),
+    ('CUST002', 'Jane Smith', 2, 2);
+
+-- Insert data into financial product dimension
+INSERT INTO dim_product_financial (product_type, risk_level, expected_return)
+VALUES 
+    ('Savings Account', 'Low', 1.50),
+    ('Mutual Fund', 'High', 8.25);
+
+-- Insert data into marketing product dimension
+INSERT INTO dim_product_marketing (target_segment, marketing_channel, commission_rate)
+VALUES 
+    ('Millennials', 'Online', 0.50),
+    ('High Net Worth', 'Direct', 1.00);
+
+-- Insert data into product dimension
+INSERT INTO dim_product (product_id, product_name, financial_key, marketing_key)
+VALUES 
+    ('PROD001', 'Savings Plus', 1, 1),
+    ('PROD002', 'Growth Fund', 2, 2);
+
+-- Insert data into branch geographic dimension
+INSERT INTO dim_branch_geographic (region, country, urban_rural_classification)
+VALUES 
+    ('North America', 'USA', 'Urban'),
+    ('Asia', 'India', 'Rural');
+
+-- Insert data into branch operational dimension
+INSERT INTO dim_branch_operational (branch_size, staffing_level, technology_tier)
+VALUES 
+    ('Large', 50, 'High'),
+    ('Medium', 25, 'Medium');
+
+-- Insert data into branch dimension
+INSERT INTO dim_branch (branch_id, branch_name, geographic_key, operational_key)
+VALUES 
+    ('BR001', 'New York Branch', 1, 1),
+    ('BR002', 'Delhi Branch', 2, 2);
+
+-- Insert data into time dimension
+INSERT INTO dim_time (full_date, year, quarter, month, day_of_week)
+VALUES 
+    ('2024-01-15', 2024, 'Q1', 1, 'Monday'),
+    ('2024-02-20', 2024, 'Q1', 2, 'Tuesday');
+
+-- Insert data into fact banking transaction table
+INSERT INTO fact_banking_transaction (customer_key, product_key, branch_key, time_key, transaction_amount, transaction_type, profit_amount)
+VALUES 
+    (1, 1, 1, 1, 1000.00, 'Deposit', 15.00),
+    (2, 2, 2, 2, 2000.00, 'Investment', 165.00);
+
+-- Insert data into fact customer performance table
+INSERT INTO fact_customer_performance (customer_key, total_transactions, total_profit, risk_score)
+VALUES 
+    (1, 5000.00, 150.00, 10),
+    (2, 8000.00, 650.00, 25);
+
+-- Analytics Queries
+-- 1. Total transactions by branch
+SELECT b.branch_name, SUM(f.transaction_amount) AS total_transactions
+FROM fact_banking_transaction f
+JOIN dim_branch b ON f.branch_key = b.branch_key
+GROUP BY b.branch_name;
+
+-- 2. Average profit by product type
+SELECT p.product_name, AVG(f.profit_amount) AS average_profit
+FROM fact_banking_transaction f
+JOIN dim_product p ON f.product_key = p.product_key
+GROUP BY p.product_name;
+
+-- 3. Total profit generated by each customer
+SELECT c.full_name, SUM(f.profit_amount) AS total_profit
+FROM fact_banking_transaction f
+JOIN dim_customer c ON f.customer_key = c.customer_key
+GROUP BY c.full_name;
+
+-- 4. Risk score analysis for high-value customers
+SELECT c.full_name, p.risk_score
+FROM fact_customer_performance p
+JOIN dim_customer c ON p.customer_key = c.customer_key
+WHERE p.total_transactions > 7000;
+
+-- 5. Transactions breakdown by product and region
+SELECT p.product_name, g.region, SUM(f.transaction_amount) AS total_transactions
+FROM fact_banking_transaction f
+JOIN dim_product p ON f.product_key = p.product_key
+JOIN dim_branch b ON f.branch_key = b.branch_key
+JOIN dim_branch_geographic g ON b.geographic_key = g.geographic_key
+GROUP BY p.product_name, g.region;
+ 
+    
+
+

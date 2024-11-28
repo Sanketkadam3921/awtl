@@ -1,0 +1,326 @@
+import pandas as pd
+from mlxtend.frequent_patterns import apriori, association_rules
+from io import StringIO
+
+# Your input data as a CSV string
+data_csv = """
+InvoiceNo,StockCode,Description,Quantity,InvoiceDate,UnitPrice,CustomerID,Country
+536365,85123A,WHITE HANGING HEART T-LIGHT HOLDER,6,01-12-2010 08:26,2.55,17850,United Kingdom
+536365,71053,WHITE METAL LANTERN,6,01-12-2010 08:26,3.39,17850,United Kingdom
+536365,84406B,CREAM CUPID HEARTS COAT HANGER,8,01-12-2010 08:26,2.75,17850,United Kingdom
+536365,84029G,KNITTED UNION FLAG HOT WATER BOTTLE,6,01-12-2010 08:26,3.39,17850,United Kingdom
+536365,84029E,RED WOOLLY HOTTIE WHITE HEART.,6,01-12-2010 08:26,3.39,17850,United Kingdom
+536365,22752,SET 7 BABUSHKA NESTING BOXES,2,01-12-2010 08:26,7.65,17850,United Kingdom
+536365,21730,GLASS STAR FROSTED T-LIGHT HOLDER,6,01-12-2010 08:26,4.25,17850,United Kingdom
+536366,22633,HAND WARMER UNION JACK,6,01-12-2010 08:28,1.85,17850,United Kingdom
+536366,22632,HAND WARMER RED POLKA DOT,6,01-12-2010 08:28,1.85,17850,United Kingdom
+536367,84879,ASSORTED COLOUR BIRD ORNAMENT,32,01-12-2010 08:34,1.69,13047,United Kingdom
+"""
+
+# Convert the CSV string to a DataFrame
+data = pd.read_csv(StringIO(data_csv), encoding='ISO-8859-1')
+
+# Drop rows with missing CustomerID
+data.dropna(subset=['CustomerID'], inplace=True)
+
+# Ensure InvoiceNo is a string
+data['InvoiceNo'] = data['InvoiceNo'].astype(str)
+
+# Remove rows with cancelled invoices (those with 'C' in InvoiceNo)
+data = data[~data['InvoiceNo'].str.contains('C')]
+
+# Create the basket for the UK
+basket = (data[data['Country'] == 'United Kingdom']
+          .groupby(['InvoiceNo', 'Description'])['Quantity']
+          .sum().unstack().reset_index().fillna(0)
+          .set_index('InvoiceNo'))
+
+# Function to encode quantities to 1 (if > 0) or 0 (if 0)
+def encode_units(x):
+    return x > 0
+
+# Apply the encoding function
+basket_sets = basket.map(encode_units)
+
+# Ensure the DataFrame contains boolean values
+basket_sets = basket_sets.astype(bool)
+
+# Step 5: Apply the Apriori algorithm to find frequent itemsets
+frequent_itemsets = apriori(basket_sets, min_support=0.01, use_colnames=True)
+
+# Step 6: Generate association rules with num_itemsets specified
+rules = association_rules(frequent_itemsets, metric="lift", min_threshold=1.0, num_itemsets=2)
+
+# Step 7: Display the frequent itemsets and the rules
+print("Frequent Itemsets:")
+print(frequent_itemsets)
+
+print("\nAssociation Rules:")
+print(rules[['antecedents', 'consequents', 'support', 'confidence', 'lift']])
+
+decision tree 
+
+# Importing the required packages
+import numpy as np
+import pandas as pd
+from sklearn.metrics import confusion_matrix, accuracy_score, classification_report
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn import tree
+import matplotlib.pyplot as plt
+
+# Function to import the dataset
+def importdata():
+    balance_data = pd.read_csv(
+        'https://archive.ics.uci.edu/ml/machine-learning-' +
+        'databases/balance-scale/balance-scale.data',
+        sep=',', header=None)
+
+    # Displaying dataset information
+    print("Dataset Length: ", len(balance_data))
+    print("Dataset Shape: ", balance_data.shape)
+    print("Dataset: ", balance_data.head())
+
+    return balance_data
+
+# Function to split the dataset into features and target variables
+def splitdataset(balance_data):
+    # Separating the target variable
+    X = balance_data.values[:, 1:5]
+    Y = balance_data.values[:, 0]
+
+    # Splitting the dataset into train and test
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, Y, test_size=0.3, random_state=100)
+
+    return X, Y, X_train, X_test, y_train, y_test
+
+def train_using_gini(X_train, X_test, y_train):
+    # Creating the classifier object
+    clf_gini = DecisionTreeClassifier(criterion="gini",
+                                      random_state=100, max_depth=3, min_samples_leaf=5)
+
+    # Performing training
+    clf_gini.fit(X_train, y_train)
+    return clf_gini
+
+def train_using_entropy(X_train, X_test, y_train):
+    # Decision tree with entropy
+    clf_entropy = DecisionTreeClassifier(
+        criterion="entropy", random_state=100,
+        max_depth=3, min_samples_leaf=5)
+
+    # Performing training
+    clf_entropy.fit(X_train, y_train)
+    return clf_entropy
+
+# Function to make predictions
+def prediction(X_test, clf_object):
+    y_pred = clf_object.predict(X_test)
+    print("Predicted values:")
+    print(y_pred)
+    return y_pred
+
+# Function to calculate accuracy
+def cal_accuracy(y_test, y_pred):
+    print("Confusion Matrix: ",
+          confusion_matrix(y_test, y_pred))
+    print("Accuracy : ",
+          accuracy_score(y_test, y_pred)*100)
+    print("Report : ",
+          classification_report(y_test, y_pred))
+
+# Function to plot the decision tree
+def plot_decision_tree(clf_object, feature_names, class_names):
+    plt.figure(figsize=(15, 10))
+    tree.plot_tree(clf_object, filled=True, feature_names=feature_names, class_names=class_names, rounded=True)
+    plt.show()
+
+if __name__ == "__main__":
+    data = importdata()
+    X, Y, X_train, X_test, y_train, y_test = splitdataset(data)
+
+    clf_gini = train_using_gini(X_train, X_test, y_train)
+    clf_entropy = train_using_entropy(X_train, X_test, y_train)
+
+    # Visualizing the Decision Trees
+    plot_decision_tree(clf_gini, ['X1', 'X2', 'X3', 'X4'], ['L', 'B', 'R'])
+    plot_decision_tree(clf_entropy, ['X1', 'X2', 'X3', 'X4'], ['L', 'B', 'R'])
+    
+    
+    
+    
+    nb
+    import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.naive_bayes import GaussianNB
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+# Load Iris Dataset
+iris = load_iris()
+X = pd.DataFrame(iris.data, columns=iris.feature_names)
+y = pd.Series(iris.target)
+# Display the first 5 rows of the dataset (head)
+df = X.copy()
+df['Species'] = y.map({0: 'setosa', 1: 'versicolor', 2: 'virginica'})  # Map target to species names
+print(df.head())
+# Data Preprocessing: Feature Scaling
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+# Split the dataset into training and testing sets (80% train, 20% test)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+# Initialize the Naive Bayes classifier (Gaussian Naive Bayes for continuous features)
+nb = GaussianNB()
+# Train the classifier on the training data
+nb.fit(X_train, y_train)
+
+# Make predictions on the test data
+y_pred = nb.predict(X_test)
+# Calculate the accuracy of the model
+accuracy = accuracy_score(y_test, y_pred)
+print(f'Accuracy: {accuracy * 100:.2f}%')
+# Display confusion matrix
+conf_matrix = confusion_matrix(y_test, y_pred)
+print("\nConfusion Matrix:")
+print(conf_matrix)
+# Plot the confusion matrix
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', xticklabels=iris.target_names, yticklabels=iris.target_names)
+plt.title("Confusion Matrix")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.show()
+# Classification report for precision, recall, and F1-score
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred, target_names=iris.target_names))
+# Perform cross-validation
+cv_scores = cross_val_score(nb, X_scaled, y, cv=5)
+print(f'\nCross-validation scores: {cv_scores}')
+print(f'Mean cross-validation score: {cv_scores.mean():.2f}')
+
+
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+# Load the dataset
+file_path = '/home/sanket/Desktop/OnlineRetail.xlsx' 
+data = pd.read_excel(file_path)
+ # Update 'sanket' to your actual username if needed
+
+# Step 3: Read the CSV file using pandas
+# Preprocess the data
+# Example: Select two numeric columns (adjust based on your dataset)
+# Replace 'Quantity' and 'UnitPrice' with actual column names
+X = data[['Quantity', 'UnitPrice']].dropna()
+
+# Standardize the data
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Elbow Method to find optimal k
+inertia = []
+k_range = range(1, 11)
+
+for k in k_range:
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    kmeans.fit(X_scaled)
+    inertia.append(kmeans.inertia_)
+
+# Plot the elbow curve
+plt.figure(figsize=(8, 5))
+plt.plot(k_range, inertia, marker='o', linestyle='--')
+plt.title("Elbow Method")
+plt.xlabel("Number of Clusters")
+plt.ylabel("Inertia")
+plt.xticks(k_range)
+plt.grid(True)
+plt.show()
+
+# Use optimal k (e.g., 4) based on the elbow method
+k = 6  # Replace with the number of clusters determined from the elbow plot
+kmeans = KMeans(n_clusters=k, random_state=42)
+kmeans.fit(X_scaled)
+
+# Scatter plot of clusters
+plt.figure(figsize=(8, 6))
+plt.scatter(X_scaled[:, 0], X_scaled[:, 1], c=kmeans.labels_, cmap='viridis', alpha=0.6)
+centers = kmeans.cluster_centers_
+plt.scatter(centers[:, 0], centers[:, 1], c='red', marker='^', s=200, label="Centroids")
+plt.title("K-Means Clustering")
+plt.xlabel("Standardized Quantity")
+plt.ylabel("Standardized Unit Price")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+    # Import necessary libraries
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from scipy.cluster.hierarchy import dendrogram, linkage
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics import silhouette_score
+
+# Load the dataset
+df = pd.read_csv('StudentsPerformance.csv')
+
+# Selecting relevant features (e.g., math, reading, writing scores)
+features = ['math score', 'reading score', 'writing score']
+X = df[features].copy()
+
+# Handle any missing data (if necessary)
+X.fillna(X.mean(), inplace=True)
+
+# Normalize the data using StandardScaler
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Step 1: Visualizing hierarchical clustering with a dendrogram
+linked = linkage(X_scaled, method='ward')
+plt.figure(figsize=(10, 7))
+dendrogram(linked,
+           orientation='top',
+           distance_sort='descending',
+           show_leaf_counts=True)
+plt.title("Dendrogram for Hierarchical Clustering")
+plt.show()
+
+# Step 2: Applying Agglomerative Clustering
+n_clusters = 3  # Number of clusters
+agg_clustering = AgglomerativeClustering(n_clusters=n_clusters, metric='euclidean', linkage='ward')
+clusters = agg_clustering.fit_predict(X_scaled)
+
+# Add cluster labels to the original dataframe
+df['Cluster'] = clusters
+
+# Step 3: Visualizing clusters using scatterplots
+# Scatter plot based on math and reading scores
+sns.scatterplot(x='math score', y='reading score', hue='Cluster', data=df, palette='Set1')
+plt.title("Cluster Visualization Based on Math and Reading Scores")
+plt.show()
+
+# Pairplot for all features to analyze cluster separation
+sns.pairplot(df[features + ['Cluster']], hue='Cluster', palette='Set1')
+plt.suptitle("Pairplot of Clusters", y=1.02)
+plt.show()
+
+# Step 4: Calculating silhouette score for cluster evaluation
+silhouette_avg = silhouette_score(X_scaled, clusters)
+print(f"Silhouette Score for {n_clusters} clusters: {silhouette_avg:.2f}")
+
+# Displaying the first few rows with cluster labels
+print(df.head())
+
+
